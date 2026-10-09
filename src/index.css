@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+/*
+  Medville Brace design tokens.
+
+  The palette is the Medville family palette, read from the live
+  medvillediabetes.com stylesheet: navy #00293B, cyan #18BADA and white, with
+  every other value a mix of two of them. No orange, no green, no neutral
+  grey. "Grey" text steps are navy let down towards the cyan tint.
+
+  Rules:
+  - No raw hex in component files. A value used twice is a token.
+  - Text on cyan is navy (6.4:1). Text on navy is white (14.6:1). White on
+    cyan is 2.3:1 and is never used.
+  - Product photographs sit on white, because every manufacturer shoots on
+    white and a tinted stage shows the edge of the photo.
+*/
+@theme {
+  --font-display: "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --text-display: clamp(2.35rem, 1.45rem + 3.6vw, 4rem);
+  --text-h1: clamp(1.9rem, 1.35rem + 2.3vw, 3rem);
+  --text-h2: clamp(1.55rem, 1.25rem + 1.4vw, 2.3rem);
+  --text-h3: clamp(1.15rem, 1.05rem + 0.5vw, 1.4rem);
+  --text-body-lg: clamp(1.03rem, 0.98rem + 0.25vw, 1.15rem);
+  --text-small: 0.875rem;
+  --text-caption: 0.8125rem;
+
+  --color-canvas: #e6f4f9;
+  --color-surface: #d3ebf3;
+  --color-surface-raised: #f3fafc;
+  --color-photo: #ffffff;
+  --color-ink: #00293b;
+  --color-ink-muted: #3d6273;
+  --color-ink-subtle: #56798a;
+  --color-line: #bfdde8;
+  --color-line-strong: #9dc9da;
+
+  --color-brand-abyss: #001824;
+  --color-brand-deep: #00293b;
+  --color-brand: #0a6d8a;
+  --color-brand-hover: #086079;
+  --color-brand-bright: #18bada;
+  --color-brand-soft: #cdeaf3;
+  --color-brand-mint: #a9dcec;
+  --color-brand-tint: #eef8fb;
+  --color-teal: #0d99bb;
+
+  --color-navy-raised: #0b3a52;
+  --color-on-dark: #ffffff;
+  --color-on-dark-brand: #c5e3ee;
+  --color-on-dark-muted: #a3c6d4;
+  --color-on-dark-accent: #6fc4e0;
+
+  /* the one colour outside the palette: a field the visitor got wrong */
+  --color-danger: #b03030;
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.875rem;
+  --radius-lg: 1.25rem;
+  --radius-card: 1.375rem;
+  --radius-sheet: 1.75rem;
+
+  --shadow-raised: 0 1px 3px rgb(0 41 59 / 0.06), 0 14px 34px -20px rgb(0 41 59 / 0.22);
+  --shadow-raised-hover: 0 2px 8px rgb(0 41 59 / 0.07), 0 24px 50px -20px rgb(0 41 59 / 0.3);
+  --shadow-overlay: 0 2px 8px rgb(0 41 59 / 0.06), 0 30px 60px -24px rgb(0 41 59 / 0.28);
+  --shadow-cta: 0 2px 6px rgb(24 186 218 / 0.22), 0 14px 30px -10px rgb(24 186 218 / 0.5);
+  --shadow-sheet: 0 24px 70px -20px rgb(0 24 36 / 0.55);
+
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --duration-base: 220ms;
+  --duration-slow: 320ms;
+}
+
+:root {
+  --gradient-wash: linear-gradient(160deg, #00293b 0%, #063b55 52%, #001824 100%);
+  --gradient-band: linear-gradient(120deg, #00293b 0%, #0a5a76 55%, #001824 100%);
+  --gradient-soft: linear-gradient(180deg, #cfe8f1 0%, #dff0f6 100%);
+  --overlay-photo: linear-gradient(180deg, rgb(0 41 59 / 0) 30%, rgb(0 41 59 / 0.86) 100%);
+  --overlay-hero: linear-gradient(90deg, #00293b 0%, rgb(0 41 59 / 0.9) 38%, rgb(0 41 59 / 0.25) 100%);
+  /* lighter: keeps a banner photograph visible behind one line of type */
+  --overlay-banner: linear-gradient(90deg, rgb(0 41 59 / 0.92) 0%, rgb(0 41 59 / 0.6) 42%, rgb(0 41 59 / 0) 78%);
+}
+
+.bg-wash { background: var(--gradient-wash); }
+.bg-band { background: var(--gradient-band); }
+.bg-soft-band { background: var(--gradient-soft); }
+.bg-photo-fade { background: var(--overlay-photo); }
+.bg-hero-fade { background: var(--overlay-hero); }
+.bg-banner-fade { background: var(--overlay-banner); }
+
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--color-ink);
+  background: var(--color-canvas);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: -0.015em; }
+
+:focus-visible {
+  outline: 3px solid var(--color-brand-bright);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Long product titles never push a card wider than its column. */
+.clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Drawer and tray entrances */
+@keyframes sheet-in-right { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes sheet-in-left { from { transform: translateX(-100%); } to { transform: none; } }
+@keyframes sheet-in-up { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.anim-sheet-right { animation: sheet-in-right var(--duration-slow) var(--ease-out-quart); }
+.anim-sheet-left { animation: sheet-in-left var(--duration-slow) var(--ease-out-quart); }
+.anim-sheet-up { animation: sheet-in-up var(--duration-slow) var(--ease-out-quart); }
+.anim-fade { animation: fade-in var(--duration-base) ease-out; }
+
+/* Article body typography for the recovery guides and policy pages */
+.prose-mb h2 { font-size: var(--text-h3); font-weight: 700; margin: 2rem 0 0.75rem; }
+.prose-mb h3 { font-size: 1.05rem; font-weight: 600; margin: 1.5rem 0 0.5rem; }
+.prose-mb p { margin: 0 0 1rem; line-height: 1.7; color: var(--color-ink-muted); }
+.prose-mb ul { margin: 0 0 1rem 1.25rem; list-style: disc; color: var(--color-ink-muted); }
+.prose-mb li { margin: 0.35rem 0; line-height: 1.6; }
+.prose-mb a { color: var(--color-brand); text-decoration: underline; text-underline-offset: 3px; }
+.prose-mb strong { color: var(--color-ink); }

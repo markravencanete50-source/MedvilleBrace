@@ -1,0 +1,102 @@
+{
+ "hero-physio-knee": {
+  "alt": "A physiotherapist supports a patient's knee during a guided stretch.",
+  "w": 1600,
+  "h": 1600
+ },
+ "fitting-afo": {
+  "alt": "A clinician fits an ankle-foot orthosis to a patient's lower leg.",
+  "w": 1200,
+  "h": 800
+ },
+ "afo-everyday": {
+  "alt": "A child's ankle-foot orthosis worn with an everyday sneaker.",
+  "w": 1200,
+  "h": 1799
+ },
+ "region-knee": {
+  "alt": "A leg wearing a hinged knee brace.",
+  "w": 900,
+  "h": 1200
+ },
+ "region-foot-ankle": {
+  "alt": "A foot resting in a post-operative shoe.",
+  "w": 900,
+  "h": 601
+ },
+ "region-back-hip": {
+  "alt": "A person presses a hand to their lower back.",
+  "w": 900,
+  "h": 1598
+ },
+ "region-neck": {
+  "alt": "A person holds the side of their neck.",
+  "w": 900,
+  "h": 507
+ },
+ "region-shoulder": {
+  "alt": "A clinician supports a patient's arm and shoulder.",
+  "w": 900,
+  "h": 600
+ },
+ "region-elbow": {
+  "alt": "A person holds their forearm near the wrist and elbow.",
+  "w": 900,
+  "h": 601
+ },
+ "region-hand-wrist": {
+  "alt": "A wrist wrapped in a supportive bandage.",
+  "w": 900,
+  "h": 600
+ },
+ "region-therapy": {
+  "alt": "An ice pack held against an ankle.",
+  "w": 900,
+  "h": 600
+ },
+ "mobility-walk": {
+  "alt": "An older woman walks outdoors with a rollator.",
+  "w": 1200,
+  "h": 879
+ },
+ "active-run": {
+  "alt": "A woman jogs along a waterfront.",
+  "w": 1400,
+  "h": 2100
+ },
+ "clinic-session": {
+  "alt": "A physiotherapist guides a patient through a hip exercise.",
+  "w": 1200,
+  "h": 1800
+ },
+ "rehab-gym": {
+  "alt": "A therapist guides a man through a rehabilitation exercise.",
+  "w": 1200,
+  "h": 800
+ },
+ "physio-leg": {
+  "alt": "A physiotherapist raises a patient's leg on a treatment table.",
+  "w": 1200,
+  "h": 800
+ },
+ "balance-training": {
+  "alt": "A patient practises balance work during physiotherapy.",
+  "w": 1200,
+  "h": 2132
+ },
+ "resistance-band": {
+  "alt": "A foot exercise with a resistance band.",
+  "w": 1200,
+  "h": 2132
+ },
+ "knee-electro": {
+  "alt": "Electrode pads placed on a knee during therapy.",
+  "w": 1200,
+  "h": 2132
+ },
+ "ankle-strap": {
+  "alt": "Hands fasten a strap around an ankle.",
+  "w": 1200,
+  "h": 1800
+ }
+}
