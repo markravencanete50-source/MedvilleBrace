@@ -1,4 +1,5 @@
 import photos from "../data/photos.json";
+import { cdnUrl } from "../lib/cdn";
 
 type Entry = { alt: string; w: number; h: number };
 const PHOTOS = photos as Record<string, Entry>;
@@ -18,7 +19,7 @@ export default function Photo({
   const p = PHOTOS[name];
   return (
     <img
-      src={`/photography/${name}.webp`}
+      src={cdnUrl(`photography/${name}`, Math.min(p?.w ?? 1200, 1600), `/photography/${name}.webp`)}
       alt={decorative ? "" : (p?.alt ?? "")}
       width={p?.w}
       height={p?.h}

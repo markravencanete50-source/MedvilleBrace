@@ -1,0 +1,5 @@
+{
+  "projects": {
+    "default": "REPLACE-WITH-CLIENT-GCP-PROJECT-ID"
+  }
+}

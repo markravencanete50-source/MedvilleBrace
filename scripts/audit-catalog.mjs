@@ -28,8 +28,13 @@ for (const p of products) {
   }
   if (existsSync(`public/products/${p.slug}/${p.images + 1}.webp`)) fail(`uncounted photo ${p.slug}/${p.images + 1}.webp`);
   if (!existsSync(`public/data/p/${p.slug}.json`)) fail(`missing detail ${p.slug}`);
-  if (existsSync("dist") && !existsSync(`dist/product/${p.slug}/index.html`)) fail(`missing prerendered page ${p.slug}`);
+  if (existsSync("dist") && !existsSync(`dist/product/${p.slug}.html`)) fail(`missing prerendered page ${p.slug}`);
 }
+
+/* The order function prices from its own copy of the catalog; it must match the site's. */
+const serverCatalog = existsSync("functions/catalog.json") ? JSON.parse(readFileSync("functions/catalog.json", "utf8")) : {};
+for (const s of slugs) if (!serverCatalog[s]) fail(`not in functions/catalog.json ${s}`);
+for (const s of Object.keys(serverCatalog)) if (!slugs.has(s)) fail(`stale entry in functions/catalog.json ${s}`);
 
 if (existsSync("dist/sitemap.xml")) {
   const sitemap = readFileSync("dist/sitemap.xml", "utf8");

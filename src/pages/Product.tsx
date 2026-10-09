@@ -7,7 +7,7 @@ import Button from "../components/Button";
 import ProductImage from "../components/ProductImage";
 import ProductCard from "../components/ProductCard";
 import NotFound from "./NotFound";
-import { categoryName, loadDetail, money, priceLabel, productBySlug, related, slugifyCondition, type ProductDetail } from "../data/catalog";
+import { categoryName, imageSrc, loadDetail, money, priceLabel, productBySlug, related, slugifyCondition, type ProductDetail } from "../data/catalog";
 import { regionBySlug } from "../data/taxonomy";
 import { COMPANY } from "../data/site";
 import { useStore } from "../lib/store";
@@ -27,7 +27,7 @@ export default function ProductPage() {
   usePageMeta({
     title: product ? `${product.brand} ${product.title}` : "Product not found",
     description: product?.summary,
-    image: product && product.images ? `/products/${product.slug}/1.webp` : undefined,
+    image: product && product.images ? imageSrc(product, 1, "lg") : undefined,
     noindex: !product,
   });
 

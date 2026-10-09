@@ -1,0 +1,20 @@
+rules_version = '2';
+
+/*
+  Medville Brace Firestore rules.
+
+  The database holds order requests (orderRequests) and hashed rate-limit
+  counters (orderLimits). Both are written only by the orderRequest function,
+  which runs with server credentials and is not subject to these rules.
+
+  No browser may read or write anything. If a future change seems to need a
+  client read of orderRequests, it is wrong: build an authenticated server
+  endpoint instead.
+*/
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

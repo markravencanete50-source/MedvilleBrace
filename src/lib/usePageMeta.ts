@@ -40,7 +40,7 @@ export function usePageMeta({
     const full = pageTitle(title);
     const desc = description || DEFAULT_DESC;
     const url = `${SITE_ORIGIN}${window.location.pathname}`;
-    const pic = image ? `${SITE_ORIGIN}${image}` : `${SITE_ORIGIN}/og-image.jpg`;
+    const pic = image ? (image.startsWith("http") ? image : `${SITE_ORIGIN}${image}`) : `${SITE_ORIGIN}/og-image.jpg`;
     document.title = full;
     setMeta("name", "description", desc);
     setMeta("property", "og:title", full);

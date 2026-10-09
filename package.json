@@ -5,13 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && node scripts/prerender.mjs",
+    "build": "tsc -b && vite build && node scripts/prerender.mjs && node scripts/strip-cdn-assets.mjs",
     "preview": "vite preview",
     "catalog:fetch": "node scripts/fetch-catalog.mjs",
     "catalog:build": "node scripts/build-catalog.mjs",
     "images:fetch": "node scripts/fetch-images.mjs",
     "images:optimize": "node scripts/optimize-images.mjs",
-    "audit": "node scripts/audit-catalog.mjs"
+    "audit": "node scripts/audit-catalog.mjs",
+    "images:upload": "node scripts/upload-cloudinary.mjs",
+    "test:functions": "node --test functions/order.test.js",
+    "deploy:cloudflare": "npm run build && npx wrangler@4 deploy",
+    "deploy:functions": "firebase deploy --only functions:orders,firestore:rules"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

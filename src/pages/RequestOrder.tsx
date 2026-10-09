@@ -11,8 +11,9 @@ import { usePageMeta } from "../lib/usePageMeta";
 
 /*
   The order request. Two honest paths, decided by VITE_ORDER_ENDPOINT:
-  - set: the request is posted as JSON, and only a successful response shows
-    the "received" screen;
+  - set: the request is posted as JSON to the orderRequest function
+    (functions/), and only a successful response shows the "received" screen
+    with the reference it returns;
   - empty: the request is written into an email the visitor sends from their
     own mail app, and the screen says exactly that. There is no path to a
     "received" message unless something was actually received.
@@ -43,6 +44,12 @@ export default function RequestOrder() {
   const [errors, setErrors] = useState<Partial<Record<keyof Fields, string>>>({});
   const [state, setState] = useState<"form" | "sending" | "sent" | "email" | "failed">("form");
   const [copied, setCopied] = useState(false);
+  /* One id per order attempt: a retry after a network error is recognised as the same order, not a second one. */
+  const [submissionId] = useState(() => crypto.randomUUID());
+  const [reference, setReference] = useState("");
+  const [failure, setFailure] = useState("");
+  /* Left empty by people; bots that fill every field are refused by the server. */
+  const [website, setWebsite] = useState("");
 
   /* A result screen replaces the form; start it at the top, not where the button was. */
   useEffect(() => {
@@ -98,14 +105,22 @@ export default function RequestOrder() {
       const res = await fetch(ORDER_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        /* Only references to products: names and prices are looked up again on the server. */
         body: JSON.stringify({
+          submissionId,
+          website,
+          agree: f.agree,
           customer: { name: f.name, email: f.email, phone: f.phone, address: { line1: f.address1, line2: f.address2, city: f.city, state: f.state, zip: f.zip } },
           notes: f.notes,
-          items: lines.map((l) => ({ slug: l.slug, title: l.title, sku: l.sku, options: l.options, optionNames: l.optionNames, qty: l.qty, unitPrice: l.price })),
-          estimatedSubtotal: cartTotal,
+          items: lines.map((l) => ({ slug: l.slug, sku: l.sku, options: l.options, qty: l.qty })),
         }),
       });
-      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setFailure(res.status === 429 ? "Too many requests from this connection. Please try again in an hour, or email us." : res.status === 400 ? "Something in the form or your cart could not be accepted. Please check it, or email us." : "");
+        throw new Error(String(res.status));
+      }
+      setReference(typeof data.reference === "string" ? data.reference : "");
       clearCart();
       setState("sent");
     } catch {
@@ -140,6 +155,11 @@ export default function RequestOrder() {
             <CheckCircle2 className="h-10 w-10 text-brand" aria-hidden="true" />
             <p className="mt-4 font-display text-h3 font-semibold">Thank you, {f.name.split(" ")[0]}.</p>
             <p className="mt-2 text-ink-muted">We have your request. A member of our team will check your sizes and email {f.email} with the confirmed total within one business day. Nothing has been charged.</p>
+            {reference && (
+              <p className="mt-4 rounded-md bg-brand-tint p-3 text-small">
+                Your reference: <strong className="font-display">{reference}</strong>
+              </p>
+            )}
             <Button to="/shop" variant="ghost" className="mt-6">
               Continue browsing
             </Button>
@@ -207,7 +227,7 @@ export default function RequestOrder() {
                 <div role="alert" className="flex gap-3 rounded-md border border-danger bg-surface-raised p-4 text-small">
                   <AlertCircle className="h-5 w-5 shrink-0 text-danger" aria-hidden="true" />
                   <p>
-                    Your request could not be sent. Please try again in a moment, or email it to{" "}
+                    {failure || "Your request could not be sent. Please try again in a moment."} You can also email it to{" "}
                     <a className="underline" href={`mailto:${COMPANY.email}?subject=${encodeURIComponent("Order request")}&body=${encodeURIComponent(summaryText())}`}>
                       {COMPANY.email}
                     </a>
@@ -215,6 +235,11 @@ export default function RequestOrder() {
                   </p>
                 </div>
               )}
+              {/* Honeypot: hidden from people and screen readers, tempting to bots. */}
+              <div aria-hidden="true" className="absolute -left-[9999px] h-px w-px overflow-hidden">
+                <label htmlFor="f-website">Website</label>
+                <input id="f-website" tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} />
+              </div>
               <fieldset className="rounded-card border border-line bg-surface-raised p-6">
                 <legend className="px-2 font-display font-semibold">Contact</legend>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -249,7 +274,7 @@ export default function RequestOrder() {
                 <label htmlFor="f-notes" className="text-small text-ink-muted">
                   Add your measurements or a question about size. Please do not include medical records.
                 </label>
-                <textarea id="f-notes" rows={4} value={f.notes} onChange={set("notes")} className="mt-2 w-full rounded-md border border-line-strong bg-surface-raised p-3.5 text-small focus:border-brand focus:outline-none" />
+                <textarea id="f-notes" rows={4} maxLength={1000} value={f.notes} onChange={set("notes")} className="mt-2 w-full rounded-md border border-line-strong bg-surface-raised p-3.5 text-small focus:border-brand focus:outline-none" />
               </fieldset>
               <div>
                 <label className="flex items-start gap-3 text-small">

@@ -23,6 +23,14 @@ Read README.md first. These are the rules that keep the site honest and on brand
 - New or changed photos must be screened for the source's branding before shipping: guarantee cards, "find your fit" cards, size charts with its logo or watermark, product placards, branded shirts. Add them to `scripts/image-blocklist.json` (keyed by source product id and source photo position), or crop with `crop` boxes.
 - Product addresses are built from brand and title, never from the source handle: the source reuses handles across different products.
 
+## Hosting
+
+- Cloudflare serves the site, Cloudinary the photos, Google Cloud (Firebase functions + Firestore) the orders. Only Google Cloud may ever receive customer data, and only on the project with the BAA accepted.
+- Never log request bodies in `functions/`, never echo submitted values in errors, never put customer details in the notification email (tests in `functions/order.test.js` guard this).
+- Prices for an order come from `functions/catalog.json` (written by `build-catalog.mjs`), never from the browser.
+- A new external origin (image host, API) must be added to the CSP in `public/_headers`, or browsers will block it.
+- Image URLs go through `src/lib/cdn.ts`; do not hard-code `/products/...` or Cloudinary URLs in components.
+
 ## Ordering
 
 - No card details are ever collected on the site.

@@ -1,0 +1,14 @@
+{
+  "name": "medville-brace-orders",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "22" },
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^9.1.0",
+    "firebase-functions": "^7.3.2"
+  }
+}

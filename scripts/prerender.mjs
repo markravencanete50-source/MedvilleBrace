@@ -34,18 +34,21 @@ function clamp(text, limit = 158) {
   return v.length <= limit ? v : `${v.slice(0, v.lastIndexOf(" ", limit - 1))}...`;
 }
 
-const [catalog, taxonomy, site, guides, policies] = await Promise.all([
+const [catalog, taxonomy, site, guides, policies, cdn] = await Promise.all([
   loadModule("src/data/catalog.ts"),
   loadModule("src/data/taxonomy.ts"),
   loadModule("src/data/site.ts"),
   loadModule("src/data/guides.ts"),
   loadModule("src/data/policies.ts"),
+  loadModule("src/lib/cdn.ts"),
 ]);
 const ORIGIN = site.SITE_ORIGIN;
 const NAME = site.SITE_NAME;
 const DEFAULT_DESC =
   "Orthopedic braces, supports and recovery products from trusted manufacturers, chosen by body region and condition, with sizing help from a real person.";
 const title = (t) => (t ? `${t} | ${NAME}` : `${NAME} | Orthopedic Braces and Supports`);
+const abs = (src) => (src.startsWith("http") ? src : `${ORIGIN}${src}`);
+const photo = (name, w = 1200) => cdn.cdnUrl(`photography/${name}`, w, `/photography/${name}.webp`);
 
 function crumbs(list) {
   return {
@@ -63,7 +66,7 @@ add({ path: "/", title: title(), description: DEFAULT_DESC, jsonLd: [ORG] });
 add({ path: "/shop", title: title("Shop all products"), description: "Every brace, support and recovery product we carry, in one place.", jsonLd: [crumbs([{ name: "Shop", path: "/shop" }])] });
 
 for (const r of taxonomy.REGIONS) {
-  add({ path: `/shop/${r.slug}`, title: title(`${r.name} braces and supports`), description: r.blurb, image: `/photography/${r.photo}.webp`, jsonLd: [crumbs([{ name: "Shop", path: "/shop" }, { name: r.name, path: `/shop/${r.slug}` }])] });
+  add({ path: `/shop/${r.slug}`, title: title(`${r.name} braces and supports`), description: r.blurb, image: photo(r.photo), jsonLd: [crumbs([{ name: "Shop", path: "/shop" }, { name: r.name, path: `/shop/${r.slug}` }])] });
 }
 for (const c of catalog.CATEGORIES) {
   add({ path: `/category/${c.slug}`, title: title(catalog.pluralCategory(c.name)), description: taxonomy.CATEGORY_NOTES[c.slug] ?? `${c.count} ${c.name} products.`, jsonLd: [crumbs([{ name: "Shop", path: "/shop" }, { name: c.name, path: `/category/${c.slug}` }])] });
@@ -74,7 +77,7 @@ for (const b of catalog.BRANDS) {
 }
 
 for (const p of catalog.PRODUCTS) {
-  const image = p.images ? `/products/${p.slug}/1.webp` : undefined;
+  const image = p.images ? catalog.imageSrc(p, 1, "lg") : undefined;
   const region = taxonomy.regionBySlug(p.region);
   add({
     path: `/product/${p.slug}`,
@@ -90,7 +93,7 @@ for (const p of catalog.PRODUCTS) {
         description: p.summary,
         brand: { "@type": "Brand", name: p.brand },
         category: catalog.categoryName(p.category),
-        ...(image ? { image: `${ORIGIN}${image}` } : {}),
+        ...(image ? { image: abs(image) } : {}),
         offers: {
           "@type": p.priceMin === p.priceMax ? "Offer" : "AggregateOffer",
           priceCurrency: "USD",
@@ -116,11 +119,11 @@ for (const g of guides.GUIDES) {
     path: `/guides/${g.slug}`,
     title: title(g.title),
     description: g.description,
-    image: `/photography/${g.photo}.webp`,
+    image: photo(g.photo),
     type: "article",
     lastmod: g.updated,
     jsonLd: [
-      { "@context": "https://schema.org", "@type": "Article", headline: g.title, description: g.description, image: `${ORIGIN}/photography/${g.photo}.webp`, dateModified: g.updated, publisher: { "@type": "Organization", name: NAME } },
+      { "@context": "https://schema.org", "@type": "Article", headline: g.title, description: g.description, image: abs(photo(g.photo)), dateModified: g.updated, publisher: { "@type": "Organization", name: NAME } },
       crumbs([{ name: "Guides", path: "/guides" }, { name: g.title, path: `/guides/${g.slug}` }]),
     ],
   });
@@ -141,7 +144,7 @@ for (const [path, t] of [["/cart", "Your cart"], ["/request-order", "Send an ord
 function render(template, p) {
   const url = `${ORIGIN}${p.path === "/" ? "/" : p.path}`;
   const desc = clamp(p.description);
-  const pic = p.image ? `${ORIGIN}${p.image}` : `${ORIGIN}/og-image.jpg`;
+  const pic = p.image ? abs(p.image) : `${ORIGIN}/og-image.jpg`;
   let html = template;
   const swap = (re, value) => {
     html = html.replace(re, value);
@@ -174,7 +177,10 @@ function render(template, p) {
 
 const template = await readFile(join(DIST, "index.html"), "utf8");
 for (const p of pages) {
-  const file = p.path === "/" ? join(DIST, "index.html") : join(DIST, p.path, "index.html");
+  /* <path>.html, not <path>/index.html: Cloudflare serves "shop/knee.html" at
+     /shop/knee, matching the canonical address, whereas a folder index is
+     served at /shop/knee/ behind a redirect. */
+  const file = p.path === "/" ? join(DIST, "index.html") : join(DIST, `${p.path}.html`);
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, render(template, p));
 }

@@ -9,6 +9,7 @@ import NotFound from "./NotFound";
 import { GUIDES, guideBySlug } from "../data/guides";
 import { PRODUCTS, pluralCategory, categoryName, sortProducts } from "../data/catalog";
 import { usePageMeta } from "../lib/usePageMeta";
+import { cdnUrl } from "../lib/cdn";
 
 export function GuidesIndex() {
   usePageMeta({ title: "Recovery guides", description: "Plain-English guides to measuring for a brace, choosing a walker boot or back brace, and using cold therapy and night splints safely." });
@@ -38,7 +39,7 @@ export function GuidesIndex() {
 export function GuidePage() {
   const { slug = "" } = useParams();
   const g = guideBySlug(slug);
-  usePageMeta({ title: g?.title ?? "Guide not found", description: g?.description, image: g ? `/photography/${g.photo}.webp` : undefined, noindex: !g });
+  usePageMeta({ title: g?.title ?? "Guide not found", description: g?.description, image: g ? cdnUrl(`photography/${g.photo}`, 1200, `/photography/${g.photo}.webp`) : undefined, noindex: !g });
   if (!g) return <NotFound />;
   const picks = g.category ? sortProducts(PRODUCTS.filter((p) => p.category === g.category && p.images > 0), "featured").slice(0, 4) : [];
   const more = GUIDES.filter((x) => x.slug !== g.slug).slice(0, 2);

@@ -8,6 +8,7 @@
 */
 import raw from "./catalog.json";
 import type { RegionSlug } from "./taxonomy";
+import { cdnUrl } from "../lib/cdn";
 
 export type Product = {
   slug: string;
@@ -88,8 +89,9 @@ export const CATEGORIES = (() => {
     .sort((a, b) => b.count - a.count);
 })();
 
+/* Cards use 480px, the product page 900px: the same widths as the local files. */
 export const imageSrc = (p: Pick<Product, "slug">, n = 1, size: "sm" | "lg" = "sm") =>
-  `/products/${p.slug}/${n}${size === "sm" ? "-sm" : ""}.webp`;
+  cdnUrl(`products/${p.slug}/${n}`, size === "sm" ? 480 : 900, `/products/${p.slug}/${n}${size === "sm" ? "-sm" : ""}.webp`);
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 export const money = (n: number) => usd.format(n);

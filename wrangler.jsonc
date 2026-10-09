@@ -1,0 +1,14 @@
+// Cloudflare deployment: Workers static assets serving the prerendered site in dist/.
+// Deploy with `npm run deploy:cloudflare`, or connect the GitHub repository in the
+// Cloudflare dashboard (Workers & Pages, build command `npm run build`).
+{
+  "name": "medville-brace",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    // Unknown addresses get dist/404.html with a 404 status; the app then shows its not-found page.
+    "not_found_handling": "404-page",
+    // shop/knee.html is served at /shop/knee, matching the canonical address.
+    "html_handling": "auto-trailing-slash"
+  }
+}
