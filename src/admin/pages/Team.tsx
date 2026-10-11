@@ -8,11 +8,12 @@ import { formatDateTime } from "../days";
 /*
   Team: who can sign in to this dashboard, and as what.
 
-  An owner invites a person by email. The server creates the Cognito account
-  and Cognito emails a temporary password; the person chooses their own at
-  first sign-in. Changing a role, switching an account off or removing it
-  ends that person's sessions, and the server checks the role on every
-  request, so the change applies at once.
+  An owner invites a person by email. The server creates the Firebase account
+  with a random password nobody sees, and this page then asks Firebase to
+  email the person a link to choose their own. There are no temporary
+  passwords. Changing a role, switching an account off or removing it ends
+  that person's sessions, and the server checks the role on every request, so
+  the change applies at once.
 
   The shared-mailbox list mirrors SHARED_MAILBOXES in aws/src/admin.mjs. The
   server copy decides; this one only saves a round trip.
@@ -24,15 +25,15 @@ const SHARED_MAILBOXES = new Set([
 const SHARED_MAILBOX_REFUSAL = "That is a shared mailbox. Every person needs their own address, because the access log records who opened each order.";
 
 const ROLE_NOTE: Record<string, string> = {
-  owner: "Orders, figures, this Team screen and the access log.",
-  staff: "Orders and figures only.",
+  owner: "Everything: orders, figures, products, questions, store details, this Team screen and the access log.",
+  staff: "Orders, figures, products and questions.",
   none: "Cannot open anything. The account stays until it is removed.",
 };
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", staff: "Staff", none: "No access" };
 
 export default function Team() {
-  const { getToken, session } = useAdminAuth();
+  const { getToken, session, requestReset } = useAdminAuth();
   const toast = useToast();
   const [admins, setAdmins] = useState<AdminUser[] | null>(null);
   const [error, setError] = useState("");
@@ -76,8 +77,15 @@ export default function Team() {
     setInviting(true);
     try {
       const r = await adminApi.inviteAdmin(getToken, address, role);
-      toast(r.created ? "Invitation sent. They will get an email with a temporary password." : "That account already existed. Its access was updated.");
       setEmail("");
+      if (!r.created) {
+        toast("That account already existed. Its access was updated.");
+      } else {
+        /* The account exists now; the email is what lets the person in. */
+        const sent = await requestReset(r.email || address).then(() => true, () => false);
+        if (sent) toast("Invitation sent. They will get an email with a link to choose a password.");
+        else toast("The account was created, but the email could not be sent. Use Send again on their row.", "danger");
+      }
       await refresh();
     } catch (problem) {
       toast(problem instanceof AdminApiError ? problem.message : "That did not work.", "danger");
@@ -93,7 +101,7 @@ export default function Team() {
       <Card className="mb-4">
         <p className="admin-label">Invite a person</p>
         <p className="admin-help" style={{ marginTop: 2 }}>
-          They get an email with a temporary password and choose their own when they first sign in. Give each person the narrowest role
+          They get an email with a link to choose their own password. Give each person the narrowest role
           that lets them do their job. Shared mailboxes such as orders@ or info@ are refused: the access log records every action against
           whoever signed in.
         </p>
@@ -143,7 +151,7 @@ export default function Team() {
                 {admins.map((user) => {
                   const isYou = user.id === session?.id;
                   const busy = busyId === user.id;
-                  const invited = user.status === "FORCE_CHANGE_PASSWORD";
+                  const invited = user.invited;
                   return (
                     <tr key={user.id}>
                       <td data-label="Person">
@@ -159,7 +167,7 @@ export default function Team() {
                         <div className="flex flex-wrap items-center gap-2">
                           {!user.enabled ? <Badge tone="danger">Switched off</Badge> : invited ? <Badge tone="warn">Invited, not signed in yet</Badge> : <Badge tone="ok">Active</Badge>}
                           {invited && user.enabled && (
-                            <button type="button" className="admin-btn admin-btn-quiet admin-btn-sm" disabled={busy} onClick={() => void act(user, () => adminApi.resendInvite(getToken, user.id), "Invitation sent again with a new temporary password.")}>
+                            <button type="button" className="admin-btn admin-btn-quiet admin-btn-sm" disabled={busy} onClick={() => void act(user, async () => requestReset((await adminApi.resendInvite(getToken, user.id)).email || user.email), "Invitation sent again with a new link.")}>
                               <Mail size={14} /> Send again
                             </button>
                           )}

@@ -1,41 +1,34 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { clearAdminApiCache } from "./api";
-import {
-  claims,
-  confirmReset,
-  isSignInConfigured,
-  passwordSignIn,
-  refresh,
-  requestReset,
-  revoke,
-  setFirstPassword,
-  type SignInResult,
-  type Tokens,
-} from "./cognito";
+import type { Auth } from "firebase/auth";
+import { clearFiguresCache } from "./figures";
+import { getFirebaseAuth, sendResetLink } from "./firebase";
+import { isFirebaseConfigured } from "../lib/firebaseConfig";
 
 /*
-  Dashboard sign-in, modelled on the Medville Diabetes dashboard.
+  Dashboard sign-in, on Firebase Authentication (email and password).
 
   - One login per person, created by an owner. Nobody can sign themselves up.
-  - The role is a Cognito group ("owner" or "staff"). It is shown here from
-    the token, but the order API reads it live from Cognito on every request,
-    so the browser can never grant itself anything.
-  - Tokens live in session storage, so closing the tab ends the session, and an
+  - The role is the custom claim "role" ("owner" or "staff") on the person's
+    ID token. Only the AWS dashboard function can set it, and the order API
+    reads the role live from Firebase on every request, so the browser can
+    never grant itself anything. Here it only decides which screens to show.
+  - A person who signs in without a role is signed out at once and told that
+    their account has no access yet.
+  - The session lives in session storage, so closing the tab ends it, and an
     idle session is signed out after IDLE_LIMIT with a warning first.
+  - Messages never say whether an address has an account.
 */
 
 const IDLE_LIMIT_MS = 20 * 60 * 1000;
 const IDLE_WARNING_MS = 2 * 60 * 1000;
-const STORE_KEY = "medville-brace:admin-session";
-const REFRESH_EARLY_MS = 2 * 60 * 1000;
 
 export type AdminRole = "owner" | "staff";
-export type AdminSection = "overview" | "calendar" | "orders" | "team" | "audit";
+export type AdminSection = "overview" | "calendar" | "orders" | "products" | "faqs" | "settings" | "team" | "audit";
 
-/* What each role can open. The server enforces the same split; this only decides what is worth showing. */
+/* What each role can open. The server and the Firestore rules enforce the same split; this only decides what is worth showing. */
 export const ROLE_ACCESS: Record<AdminRole, AdminSection[]> = {
-  owner: ["overview", "calendar", "orders", "team", "audit"],
-  staff: ["overview", "calendar", "orders"],
+  owner: ["overview", "calendar", "orders", "products", "faqs", "settings", "team", "audit"],
+  staff: ["overview", "calendar", "orders", "products", "faqs"],
 };
 
 export const canOpen = (role: AdminRole, section: string) => (ROLE_ACCESS[role] as string[]).includes(section);
@@ -50,14 +43,12 @@ interface AuthState {
   ready: boolean;
   configured: boolean;
   session: AdminSession | null;
-  /* Signed in to Cognito, but in no group yet. */
+  /* Signed in to Firebase, but with no role yet. The login is dropped at once. */
   pendingApproval: boolean;
   idleWarning: boolean;
   signedOutReason: string;
-  signIn: (email: string, password: string) => Promise<SignInResult["kind"]>;
-  completeNewPassword: (password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<"signed-in" | "no-access">;
   requestReset: (email: string) => Promise<void>;
-  confirmReset: (email: string, code: string, password: string) => Promise<void>;
   signOutNow: (reason?: string) => Promise<void>;
   getToken: () => Promise<string | null>;
   keepAwake: () => void;
@@ -65,107 +56,128 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 
-function readStored(): Tokens | null {
-  try {
-    const raw = sessionStorage.getItem(STORE_KEY);
-    const t = raw ? (JSON.parse(raw) as Tokens) : null;
-    return t && typeof t.idToken === "string" && typeof t.refreshToken === "string" && typeof t.expiresAt === "number" ? t : null;
-  } catch {
-    return null;
-  }
+/* Plain sentences. None of them says whether an account exists. */
+const PLAIN: Record<string, string> = {
+  "auth/invalid-credential": "That email address and password did not match.",
+  "auth/wrong-password": "That email address and password did not match.",
+  "auth/user-not-found": "That email address and password did not match.",
+  "auth/invalid-login-credentials": "That email address and password did not match.",
+  "auth/invalid-email": "Please enter a valid email address.",
+  "auth/missing-password": "Please enter your password.",
+  "auth/user-disabled": "This sign-in is not available. Ask an owner for help.",
+  "auth/too-many-requests": "Too many attempts. Wait a few minutes and try again.",
+  "auth/network-request-failed": "The sign-in service could not be reached. Check the connection and try again.",
+  "auth/timeout": "The sign-in service could not be reached. Check the connection and try again.",
+  "auth/user-token-expired": "Your session ended. Please sign in again.",
+  "auth/requires-recent-login": "Your session ended. Please sign in again.",
+  "auth/operation-not-allowed": "Sign-in is not available right now. Please try again later.",
+  "auth/invalid-api-key": "Sign-in is not set up correctly in this build. Tell the person who runs the website.",
+  "auth/api-key-not-valid.-please-pass-a-valid-api-key.": "Sign-in is not set up correctly in this build. Tell the person who runs the website.",
+  "auth/app-not-authorized": "Sign-in is not set up correctly in this build. Tell the person who runs the website.",
+  "auth/unauthorized-domain": "Sign-in is not set up for this address. Tell the person who runs the website.",
+};
+
+export class SignInError extends Error {}
+
+function plain(problem: unknown, fallback: string) {
+  const code = typeof (problem as { code?: unknown })?.code === "string" ? (problem as { code: string }).code : "";
+  return new SignInError(PLAIN[code] ?? (/network|fetch|Failed to load/i.test(String((problem as Error)?.message ?? "")) ? PLAIN["auth/network-request-failed"] : fallback));
 }
 
-function store(tokens: Tokens | null) {
-  try {
-    if (tokens) sessionStorage.setItem(STORE_KEY, JSON.stringify(tokens));
-    else sessionStorage.removeItem(STORE_KEY);
-  } catch {
-    /* private window: the session lasts as long as this page */
-  }
-}
-
-function sessionFrom(tokens: Tokens): AdminSession | null {
-  const c = claims(tokens.idToken);
-  const groups = Array.isArray(c["cognito:groups"]) ? (c["cognito:groups"] as string[]) : [];
-  const role: AdminRole | null = groups.includes("owner") ? "owner" : groups.includes("staff") ? "staff" : null;
-  if (!role) return null;
-  return { id: String(c["cognito:username"] ?? c.sub ?? ""), email: String(c.email ?? ""), role };
-}
+const roleOf = (claim: unknown): AdminRole | null => (claim === "owner" || claim === "staff" ? claim : null);
 
 const ACTIVITY_EVENTS = ["pointerdown", "keydown", "wheel", "touchstart"] as const;
 
 export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
-  const configured = isSignInConfigured();
-  const [ready, setReady] = useState(false);
+  const configured = isFirebaseConfigured();
+  const [ready, setReady] = useState(!configured);
   const [session, setSession] = useState<AdminSession | null>(null);
   const [pendingApproval, setPendingApproval] = useState(false);
   const [idleWarning, setIdleWarning] = useState(false);
   const [signedOutReason, setSignedOutReason] = useState("");
-  const tokens = useRef<Tokens | null>(null);
-  const challenge = useRef<{ session: string; username: string } | null>(null);
-  const refreshing = useRef<Promise<Tokens | null> | null>(null);
+  const auth = useRef<Auth | null>(null);
   const lastActivity = useRef(Date.now());
+  /* Set while this page ends the session itself, so the listener does not report it as a surprise. */
+  const leaving = useRef(false);
+  const hadSession = useRef(false);
+  const generation = useRef(0);
 
-  /* A login with no role keeps nothing: its tokens are dropped and revoked, and the sign-in page says why. */
-  const adopt = useCallback((next: Tokens | null) => {
-    clearAdminApiCache();
-    const s = next ? sessionFrom(next) : null;
-    tokens.current = s ? next : null;
-    store(s ? next : null);
-    setSession(s);
-    setPendingApproval(Boolean(next && !s));
-    if (next && !s && next.refreshToken) void revoke(next.refreshToken).catch(() => undefined);
-  }, []);
-
-  const signOutNow = useCallback(
-    async (reason = "") => {
-      const current = tokens.current;
-      adopt(null);
-      setIdleWarning(false);
-      setSignedOutReason(reason);
-      if (current?.refreshToken) await revoke(current.refreshToken).catch(() => undefined);
-    },
-    [adopt],
-  );
-
-  /* Fresh tokens when the current ID token is close to its end. One refresh at a time. */
-  const fresh = useCallback(async (): Promise<Tokens | null> => {
-    const current = tokens.current;
-    if (!current) return null;
-    if (current.expiresAt - Date.now() > REFRESH_EARLY_MS) return current;
-    if (!refreshing.current) {
-      refreshing.current = refresh(current.refreshToken)
-        .then((next) => {
-          adopt(next);
-          return next;
-        })
-        .catch(() => {
-          void signOutNow("Your session ended. Please sign in again.");
-          return null;
-        })
-        .finally(() => {
-          refreshing.current = null;
-        });
+  const signOutNow = useCallback(async (reason = "") => {
+    leaving.current = true;
+    clearFiguresCache();
+    setSession(null);
+    hadSession.current = false;
+    setIdleWarning(false);
+    setSignedOutReason(reason);
+    try {
+      const instance = auth.current ?? (configured ? await getFirebaseAuth() : null);
+      const sdk = await import("firebase/auth");
+      if (instance) await sdk.signOut(instance);
+    } catch {
+      /* Nothing more to end: the page no longer holds a session. */
+    } finally {
+      leaving.current = false;
     }
-    return refreshing.current;
-  }, [adopt, signOutNow]);
+  }, [configured]);
 
-  /* Picks up a session from this tab's storage after a reload. */
+  /* One listener keeps the session, and the role on it, in step with Firebase, including after a token refresh. */
   useEffect(() => {
-    const saved = readStored();
-    if (!saved) {
-      setReady(true);
-      return;
-    }
-    tokens.current = saved;
-    fresh()
-      .then((t) => t && adopt(t))
-      .finally(() => setReady(true));
-  }, [adopt, fresh]);
+    if (!configured) return;
+    let off: (() => void) | undefined;
+    let dead = false;
+    void (async () => {
+      try {
+        const [instance, sdk] = await Promise.all([getFirebaseAuth(), import("firebase/auth")]);
+        if (dead) return;
+        auth.current = instance;
+        off = sdk.onIdTokenChanged(instance, async (user) => {
+          const mine = ++generation.current;
+          if (!user) {
+            clearFiguresCache();
+            setSession(null);
+            if (hadSession.current && !leaving.current) setSignedOutReason("Your session ended. Please sign in again.");
+            hadSession.current = false;
+            setReady(true);
+            return;
+          }
+          let role: AdminRole | null = null;
+          try {
+            role = roleOf((await user.getIdTokenResult()).claims.role);
+          } catch {
+            role = null;
+          }
+          if (mine !== generation.current) return;
+          if (!role) {
+            /* Signed in but with no role: keep nothing. */
+            clearFiguresCache();
+            setSession(null);
+            setPendingApproval(true);
+            hadSession.current = false;
+            setReady(true);
+            leaving.current = true;
+            await sdk.signOut(instance).catch(() => undefined);
+            leaving.current = false;
+            return;
+          }
+          setPendingApproval(false);
+          hadSession.current = true;
+          setSession({ id: user.uid, email: user.email ?? "", role });
+          setReady(true);
+        });
+      } catch {
+        if (!dead) setReady(true);
+      }
+    })();
+    return () => {
+      dead = true;
+      off?.();
+    };
+  }, [configured]);
 
   /* The idle timer watches real input, so a dashboard left open on a shared desk closes itself. */
   useEffect(() => {
     if (!session) return;
+    lastActivity.current = Date.now();
     const markActive = () => {
       lastActivity.current = Date.now();
       setIdleWarning(false);
@@ -196,30 +208,47 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       },
       signIn: async (email, password) => {
         setSignedOutReason("");
-        const result = await passwordSignIn(email, password);
-        if (result.kind === "new-password") {
-          challenge.current = { session: result.session, username: result.username };
-        } else {
+        setPendingApproval(false);
+        try {
+          const [instance, sdk] = await Promise.all([getFirebaseAuth(), import("firebase/auth")]);
+          auth.current = instance;
+          const { user } = await sdk.signInWithEmailAndPassword(instance, email.trim(), password);
+          /* A fresh sign-in carries fresh claims, so the role is known here. */
+          if (!roleOf((await user.getIdTokenResult()).claims.role)) {
+            setPendingApproval(true);
+            leaving.current = true;
+            await sdk.signOut(instance).catch(() => undefined);
+            leaving.current = false;
+            return "no-access";
+          }
           lastActivity.current = Date.now();
-          adopt(result.tokens);
+          return "signed-in";
+        } catch (problem) {
+          throw plain(problem, "Sign-in did not work. Please try again.");
         }
-        return result.kind;
       },
-      completeNewPassword: async (password) => {
-        const c = challenge.current;
-        if (!c) throw new Error("Please sign in again.");
-        const result = await setFirstPassword(c.session, c.username, password);
-        if (result.kind !== "signed-in") throw new Error("Please sign in again.");
-        challenge.current = null;
-        lastActivity.current = Date.now();
-        adopt(result.tokens);
+      requestReset: async (email) => {
+        try {
+          await sendResetLink(email);
+        } catch (problem) {
+          /* An address with no account must look exactly like one with an account. */
+          const code = typeof (problem as { code?: unknown })?.code === "string" ? (problem as { code: string }).code : "";
+          if (code === "auth/user-not-found") return;
+          throw plain(problem, "The email could not be sent. Please try again.");
+        }
       },
-      requestReset,
-      confirmReset,
       signOutNow,
-      getToken: async () => (await fresh())?.idToken ?? null,
+      getToken: async () => {
+        const user = auth.current?.currentUser;
+        if (!user) return null;
+        try {
+          return await user.getIdToken();
+        } catch {
+          return null;
+        }
+      },
     }),
-    [ready, configured, session, pendingApproval, idleWarning, signedOutReason, adopt, fresh, signOutNow],
+    [ready, configured, session, pendingApproval, idleWarning, signedOutReason, signOutNow],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

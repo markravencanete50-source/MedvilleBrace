@@ -1,0 +1,126 @@
+rules_version = '2';
+
+/*
+  Medville Brace: Firestore security rules.
+
+  This project holds data with no customer details in it. Customer orders,
+  names, emails, addresses and notes live in AWS (DynamoDB, in the account with
+  the BAA) and never in this database. Three things live here:
+
+  1. Editable store content (store/settings, store/faqs, store/catalog).
+     The website copies it at build time through the public REST endpoint, so
+     it is public to read. Only a signed-in staff member may write it, and
+     every write must carry the server's time and the writer's own email.
+
+  2. Daily order figures (figures/<YYYY-MM-DD>): counts and sums only. Staff
+     can read them. Nobody can write them from a browser: the AWS figures
+     function writes them with a service account, which bypasses these rules.
+
+  3. Nothing else. Every other path is closed.
+
+  Roles live in the sign-in token as the custom claim "role" ("owner" or
+  "staff"). Only the AWS dashboard function can set that claim, so a role
+  cannot be granted by writing to Firestore or from the browser.
+
+    owner  every document above, including store/settings
+    staff  store/faqs and store/catalog, and the figures
+
+  Limits: rules cannot loop, so they check each document's shape, size and
+  top-level types, but not every entry inside store/faqs.items or
+  store/catalog.products. The dashboard validates those entries, the build
+  ignores anything it does not understand, and Firestore caps a document at
+  1 MiB. The numbers below match LIMITS in src/admin/storeContent.ts.
+
+  If a change to this file appears to open figures to the public, or lets a
+  browser write them, it is wrong. Route it through the AWS function instead.
+*/
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function role() {
+      return signedIn() ? request.auth.token.get('role', '') : '';
+    }
+
+    function isOwner() {
+      return role() == 'owner';
+    }
+
+    function isStaff() {
+      return role() == 'owner' || role() == 'staff';
+    }
+
+    /* Every write names who made it and when, using values the browser cannot forge. */
+    function stamped(d) {
+      return d.updatedAt == request.time
+        && request.auth.token.get('email', '') != ''
+        && d.updatedBy == request.auth.token.email;
+    }
+
+    function text(d, key, limit) {
+      return d[key] is string && d[key].size() <= limit;
+    }
+
+    /* ---- editable store content: public to read ---- */
+
+    function validSettings(d) {
+      return d.keys().hasOnly(['email', 'phone', 'hours', 'freeShippingFrom', 'returnDays', 'notice', 'updatedAt', 'updatedBy'])
+        && d.keys().hasAll(['email', 'phone', 'hours', 'freeShippingFrom', 'returnDays', 'notice', 'updatedAt', 'updatedBy'])
+        && text(d, 'email', 254) && d.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')
+        && text(d, 'phone', 40)
+        && text(d, 'hours', 200) && d.hours.size() >= 1
+        && text(d, 'notice', 200)
+        && d.freeShippingFrom is number && d.freeShippingFrom >= 0 && d.freeShippingFrom <= 100000
+        && d.returnDays is int && d.returnDays >= 0 && d.returnDays <= 365
+        && stamped(d);
+    }
+
+    function validFaqs(d) {
+      return d.keys().hasOnly(['items', 'updatedAt', 'updatedBy'])
+        && d.keys().hasAll(['items', 'updatedAt', 'updatedBy'])
+        && d.items is list && d.items.size() <= 40
+        && stamped(d);
+    }
+
+    function validCatalog(d) {
+      return d.keys().hasOnly(['products', 'updatedAt', 'updatedBy'])
+        && d.keys().hasAll(['products', 'updatedAt', 'updatedBy'])
+        && d.products is map && d.products.size() <= 5000
+        && stamped(d);
+    }
+
+    match /store/settings {
+      allow read: if true;
+      allow create, update: if isOwner() && validSettings(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /store/faqs {
+      allow read: if true;
+      allow create, update: if isStaff() && validFaqs(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /store/catalog {
+      allow read: if true;
+      allow create, update: if isStaff() && validCatalog(request.resource.data);
+      allow delete: if false;
+    }
+
+    /* ---- daily order figures: staff read, written only by the AWS function ---- */
+
+    match /figures/{day} {
+      allow get, list: if isStaff();
+      allow write: if false;
+    }
+
+    /* Everything else stays closed. */
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

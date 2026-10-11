@@ -117,7 +117,9 @@ export default function RequestOrder() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setFailure(res.status === 429 ? "Too many requests from this connection. Please try again in an hour, or email us." : res.status === 400 ? "Something in the form or your cart could not be accepted. Please check it, or email us." : res.status === 409 ? "This request was already sent with different details. Refresh the page to send a new one, or email us to change it." : "");
+        /* The server explains a refusal in plain words (for example a request already sent with different details). */
+        const said = typeof data.error === "string" && data.error.trim() ? data.error.trim().slice(0, 300) : "";
+        setFailure(said || (res.status === 429 ? "Too many requests from this connection. Please try again in an hour, or email us." : res.status === 400 ? "Something in the form or your cart could not be accepted. Please check it, or email us." : res.status === 409 ? "This request was already sent with different details. Refresh the page to send a new one, or email us to change it." : ""));
         throw new Error(String(res.status));
       }
       setReference(typeof data.reference === "string" ? data.reference : "");

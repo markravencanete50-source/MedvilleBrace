@@ -1210,3 +1210,79 @@
   .admin-btn,
   .admin-chip { transition: none; }
 }
+
+/* ---- store screens: switch, publish bar, product rows ---- */
+
+/* An on and off control. Cyan when on, with navy type; the whole row is the touch target. */
+.admin-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0;
+  color: var(--a-text);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.admin-switch:disabled { cursor: not-allowed; opacity: 0.55; }
+.admin-switch-track {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 26px;
+  border: 1px solid var(--a-line-strong);
+  border-radius: 999px;
+  background: var(--a-surface-2);
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.admin-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--a-text-muted);
+  transition: transform 150ms ease, background 150ms ease;
+}
+.admin-switch[aria-checked="true"] .admin-switch-track { border-color: var(--a-accent); background: var(--a-accent); }
+.admin-switch[aria-checked="true"] .admin-switch-thumb { transform: translateX(18px); background: var(--a-cta-text); }
+.admin-switch:focus-visible { outline: 2px solid var(--a-brand); outline-offset: 2px; border-radius: 999px; }
+
+/* The strip that says whether saved changes are live, with the Publish button. */
+.admin-publish {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.admin-publish p { margin: 0; }
+.admin-publish-state { margin-top: 4px; font-size: 13px; font-weight: 600; }
+
+/* A row in a list of products or questions that opens something. */
+.admin-row-list { list-style: none; margin: 0; padding: 0; }
+.admin-row-list > li { border-bottom: 1px solid var(--a-line); }
+.admin-row-list > li:last-child { border-bottom: 0; }
+.admin-row-btn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 16px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.admin-row-btn:hover { background: var(--a-surface-2); }
+.admin-row-btn:focus-visible { outline: 2px solid var(--a-brand); outline-offset: -2px; }
+.admin-row-title { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.admin-row-sub { display: block; margin-top: 2px; color: var(--a-text-muted); font-size: 12.5px; font-weight: 400; }
+
+/* One question being edited. */
+.admin-faq-item { border: 1px solid var(--a-line); border-radius: var(--a-radius-sm); padding: 14px; background: var(--a-surface-2); }

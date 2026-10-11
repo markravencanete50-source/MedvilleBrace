@@ -1,5 +1,5 @@
 /*
-  Deploys the order stack (aws/medville-brace-orders.yaml: order intake and the dashboard API) with the AWS CLI v2.
+  Deploys the order stack (aws/medville-brace-orders.yaml: order intake, the dashboard API and the daily figures sync) with the AWS CLI v2.
 
   Run it signed in to the AWS account that has the BAA in effect:
 
@@ -16,6 +16,9 @@
     SENDER_EMAIL      notification From address
     NOTIFY_TO         comma-separated order inboxes
     BUSINESS_TIME_ZONE  dashboard day boundaries, default America/New_York
+    FIREBASE_PROJECT_ID   the Firebase project for staff sign-in, store content and figures (turns the dashboard on)
+    GOOGLE_KEY_SECRET_ARN the Secrets Manager secret from npm run google:key (the dashboard needs both of these)
+    DEPLOY_HOOK_URL       Vercel deploy hook for the dashboard's Publish button (optional)
     AWS_REGION        defaults to us-east-1, the region in the site's CSP
 */
 import { spawnSync } from "node:child_process";
@@ -31,7 +34,8 @@ const stack = "medville-brace-orders";
 const execute = process.argv.includes("--execute");
 
 function run(cmd, args) {
-  console.log(`> ${cmd} ${args.join(" ")}`);
+  /* The deploy hook URL works like a password: keep it out of the terminal. */
+  console.log(`> ${cmd} ${args.join(" ").replace(/DeployHookUrl=S+/, "DeployHookUrl=...")}`);
   const r = spawnSync(cmd, args, { stdio: "inherit" });
   if (r.error || r.status !== 0) {
     console.error(r.error ? r.error.message : `${cmd} exited with ${r.status}`);
@@ -56,6 +60,9 @@ const overrides = Object.entries({
   SenderEmail: env.SENDER_EMAIL,
   NotifyTo: env.NOTIFY_TO,
   BusinessTimeZone: env.BUSINESS_TIME_ZONE,
+  FirebaseProjectId: env.FIREBASE_PROJECT_ID,
+  GoogleKeySecretArn: env.GOOGLE_KEY_SECRET_ARN,
+  DeployHookUrl: env.DEPLOY_HOOK_URL,
 })
   .filter(([, v]) => v !== undefined)
   .map(([k, v]) => `${k}=${v}`);

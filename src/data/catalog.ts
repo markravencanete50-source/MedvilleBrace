@@ -9,6 +9,7 @@
 import raw from "./catalog.json";
 import type { RegionSlug } from "./taxonomy";
 import { cdnUrl } from "../lib/cdn";
+import { productChange, variantKey } from "./content";
 
 export type Product = {
   slug: string;
@@ -50,8 +51,27 @@ type Raw = {
 };
 const data = raw as Raw;
 
-export const PRODUCTS: Product[] = data.products;
-export const CONDITIONS = data.conditions;
+/* Every product in the catalog, before the store changes made in the dashboard. Only the dashboard needs this. */
+export const ALL_PRODUCTS: Product[] = data.products;
+
+/*
+  Store changes from the dashboard (see content.ts), applied once at load:
+  hidden products are left out, and a product with price or stock changes
+  takes its price range and availability from the build-time index.
+*/
+export const PRODUCTS: Product[] = data.products.flatMap((p) => {
+  const change = productChange(p.slug);
+  if (change?.hidden) return [];
+  return change?.index ? [{ ...p, ...change.index }] : [p];
+});
+const hiddenProducts = data.products.filter((p) => productChange(p.slug)?.hidden);
+
+/* Conditions drop a hidden product from their count, and disappear when no shown product has them. */
+export const CONDITIONS = hiddenProducts.length
+  ? data.conditions
+      .map((c) => ({ ...c, count: c.count - hiddenProducts.filter((p) => p.conditions.includes(c.name)).length }))
+      .filter((c) => c.count > 0 && PRODUCTS.some((p) => p.conditions.includes(c.name)))
+  : data.conditions;
 export const CATEGORY_NAMES: Record<string, string> = data.categories;
 
 const bySlug = new Map(PRODUCTS.map((p) => [p.slug, p]));
@@ -145,11 +165,23 @@ export function related(p: Product, limit = 8) {
   return same.sort((a, b) => score(b) - score(a) || featuredScore(b) - featuredScore(a)).slice(0, limit);
 }
 
+/* The product's detail with the dashboard's price and stock changes applied. */
 export async function loadDetail(slug: string): Promise<ProductDetail | null> {
+  const change = productChange(slug);
+  if (change?.hidden) return null;
   try {
     const res = await fetch(`/data/p/${slug}.json`);
     if (!res.ok) return null;
-    return (await res.json()) as ProductDetail;
+    const detail = (await res.json()) as ProductDetail;
+    const changes = change?.variants;
+    if (!changes) return detail;
+    return {
+      ...detail,
+      variants: detail.variants.map((v) => {
+        const c = Object.hasOwn(changes, variantKey(v)) ? changes[variantKey(v)] : undefined;
+        return c ? { ...v, ...(c.p ? { p: c.p } : {}), ...(c.a === false ? { a: false } : {}) } : v;
+      }),
+    };
   } catch {
     return null;
   }

@@ -1,9 +1,10 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Medville Brace order requests and the order dashboard. Deploy only in the AWS
-  account with the BAA in effect. Every service here (API Gateway, Lambda,
-  DynamoDB, KMS, SES, Secrets Manager, Cognito, CloudWatch Logs) is HIPAA
-  eligible. Packaged and deployed by
+  Medville Brace order requests and the order dashboard's data. Deploy only in
+  the AWS account with the BAA in effect. Every service here (API Gateway,
+  Lambda, DynamoDB, KMS, SES, Secrets Manager, CloudWatch Logs) is HIPAA
+  eligible. Customer data stays here; Firebase holds only staff sign-in, store
+  content and daily figures without customer details. Packaged and deployed by
   scripts/deploy-orders.mjs; Code points at the bundle from scripts/build-aws.mjs.
 
 Parameters:
@@ -31,10 +32,29 @@ Parameters:
     Type: String
     Default: America/New_York
     Description: IANA time zone that decides which calendar day an order belongs to on the dashboard.
+  FirebaseProjectId:
+    Type: String
+    Default: ""
+    Description: >-
+      The Firebase project for staff sign-in, store content and daily figures (no customer data).
+      Empty leaves the dashboard API and the figures sync out, and order intake uses the built prices.
+  GoogleKeySecretArn:
+    Type: String
+    Default: ""
+    Description: >-
+      ARN of the Secrets Manager secret holding the Firebase service account's JSON key
+      (npm run google:key creates it). Needed for the dashboard API and the figures sync.
+  DeployHookUrl:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Optional Vercel deploy hook. Lets the dashboard's Publish button rebuild the website after store changes.
 
 Conditions:
   HasSenderDomain: !Not [!Equals [!Ref SenderDomain, ""]]
   CanNotify: !And [!Not [!Equals [!Ref SenderEmail, ""]], !Not [!Equals [!Ref NotifyTo, ""]]]
+  HasFirebase: !Not [!Equals [!Ref FirebaseProjectId, ""]]
+  HasDashboard: !And [!Condition HasFirebase, !Not [!Equals [!Ref GoogleKeySecretArn, ""]]]
 
 Resources:
   OrdersKey:
@@ -85,6 +105,9 @@ Resources:
       KeySchema:
         - AttributeName: id
           KeyType: HASH
+      # Keys only: the figures sync learns which order changed, never what it holds.
+      StreamSpecification:
+        StreamViewType: KEYS_ONLY
       GlobalSecondaryIndexes:
         - IndexName: OrderTimeline
           KeySchema:
@@ -157,81 +180,6 @@ Resources:
           Projection:
             ProjectionType: ALL
 
-  # Dashboard sign-in. Staff accounts only: no customer is ever a user here.
-  # Accounts are created by an owner from the dashboard (or by
-  # scripts/create-admin.mjs for the first owner); nobody can sign themselves up.
-  AdminUserPool:
-    Type: AWS::Cognito::UserPool
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      UserPoolName: medville-brace-dashboard
-      DeletionProtection: ACTIVE
-      UsernameAttributes: [email]
-      AutoVerifiedAttributes: [email]
-      UsernameConfiguration:
-        CaseSensitive: false
-      MfaConfiguration: "OFF"
-      AccountRecoverySetting:
-        RecoveryMechanisms:
-          - Name: verified_email
-            Priority: 1
-      Policies:
-        PasswordPolicy:
-          MinimumLength: 12
-          RequireLowercase: true
-          RequireUppercase: true
-          RequireNumbers: true
-          RequireSymbols: false
-          TemporaryPasswordValidityDays: 7
-      AdminCreateUserConfig:
-        AllowAdminCreateUserOnly: true
-        InviteMessageTemplate:
-          EmailSubject: Your Medville Brace dashboard account
-          EmailMessage: !Sub
-            - >-
-              You now have access to the Medville Brace order dashboard at ${Site}/admin.
-              Sign in with {username} and this temporary password: {####}
-              You will then choose your own password. The temporary password works for 7 days.
-            - Site: !Select [0, !Ref AllowedOrigins]
-      VerificationMessageTemplate:
-        DefaultEmailOption: CONFIRM_WITH_CODE
-        EmailSubject: Your Medville Brace dashboard code
-        EmailMessage: "Your Medville Brace dashboard code is {####}. If you did not ask for it, you can ignore this email."
-
-  OwnerGroup:
-    Type: AWS::Cognito::UserPoolGroup
-    Properties:
-      UserPoolId: !Ref AdminUserPool
-      GroupName: owner
-      Description: Orders, figures, staff accounts and the access log
-
-  StaffGroup:
-    Type: AWS::Cognito::UserPoolGroup
-    Properties:
-      UserPoolId: !Ref AdminUserPool
-      GroupName: staff
-      Description: Orders and figures only
-
-  AdminClient:
-    Type: AWS::Cognito::UserPoolClient
-    Properties:
-      UserPoolId: !Ref AdminUserPool
-      ClientName: medville-brace-dashboard
-      GenerateSecret: false
-      ExplicitAuthFlows: [ALLOW_USER_PASSWORD_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
-      PreventUserExistenceErrors: ENABLED
-      EnableTokenRevocation: true
-      AuthSessionValidity: 10
-      AccessTokenValidity: 30
-      IdTokenValidity: 30
-      RefreshTokenValidity: 12
-      TokenValidityUnits:
-        AccessToken: minutes
-        IdToken: minutes
-        RefreshToken: hours
-      ReadAttributes: [email, email_verified]
-
   SenderEmailIdentity:
     Type: AWS::SES::EmailIdentity
     Condition: HasSenderDomain
@@ -273,6 +221,7 @@ Resources:
 
   AdminRole:
     Type: AWS::IAM::Role
+    Condition: HasDashboard
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -301,22 +250,49 @@ Resources:
                 Action: [kms:Decrypt, kms:Encrypt, kms:GenerateDataKey]
                 Resource: !GetAtt OrdersKey.Arn
               - Effect: Allow
-                Action:
-                  - cognito-idp:AdminGetUser
-                  - cognito-idp:AdminListGroupsForUser
-                  - cognito-idp:ListUsers
-                  - cognito-idp:ListUsersInGroup
-                  - cognito-idp:AdminCreateUser
-                  - cognito-idp:AdminAddUserToGroup
-                  - cognito-idp:AdminRemoveUserFromGroup
-                  - cognito-idp:AdminEnableUser
-                  - cognito-idp:AdminDisableUser
-                  - cognito-idp:AdminDeleteUser
-                  - cognito-idp:AdminUserGlobalSignOut
-                Resource: !GetAtt AdminUserPool.Arn
+                Action: [secretsmanager:GetSecretValue]
+                Resource: !Ref GoogleKeySecretArn
               - Effect: Allow
                 Action: [logs:CreateLogStream, logs:PutLogEvents]
                 Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/medville-brace-admin:*
+
+  FiguresRole:
+    Type: AWS::IAM::Role
+    Condition: HasDashboard
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: medville-brace-figures
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem]
+                Resource: !GetAtt OrdersTable.Arn
+              - Effect: Allow
+                Action: [dynamodb:Query]
+                Resource: !Sub ${OrdersTable.Arn}/index/OrderTimeline
+              - Effect: Allow
+                Action: [dynamodb:DescribeStream, dynamodb:GetRecords, dynamodb:GetShardIterator]
+                Resource: !GetAtt OrdersTable.StreamArn
+              # ListStreams does not support resource-level permissions.
+              - Effect: Allow
+                Action: [dynamodb:ListStreams]
+                Resource: "*"
+              - Effect: Allow
+                Action: [kms:Decrypt]
+                Resource: !GetAtt OrdersKey.Arn
+              - Effect: Allow
+                Action: [secretsmanager:GetSecretValue]
+                Resource: !Ref GoogleKeySecretArn
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/medville-brace-figures:*
 
   OrdersLogGroup:
     Type: AWS::Logs::LogGroup
@@ -351,9 +327,11 @@ Resources:
           RATE_LIMIT_SECRET: !Join ["", ["{{resolve:secretsmanager:", !Ref RateLimitSecret, ":SecretString}}"]]
           SENDER_EMAIL: !If [CanNotify, !Ref SenderEmail, ""]
           NOTIFY_TO: !If [CanNotify, !Ref NotifyTo, ""]
+          FIREBASE_PROJECT_ID: !Ref FirebaseProjectId
 
   AdminLogGroup:
     Type: AWS::Logs::LogGroup
+    Condition: HasDashboard
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
@@ -362,6 +340,7 @@ Resources:
 
   AdminFunction:
     Type: AWS::Lambda::Function
+    Condition: HasDashboard
     Properties:
       FunctionName: medville-brace-admin
       Runtime: nodejs22.x
@@ -381,8 +360,56 @@ Resources:
           ALLOWED_ORIGINS: !Join [",", !Ref AllowedOrigins]
           ORDERS_TABLE: !Ref OrdersTable
           AUDIT_TABLE: !Ref AuditTable
-          USER_POOL_ID: !Ref AdminUserPool
           BUSINESS_TIME_ZONE: !Ref BusinessTimeZone
+          FIREBASE_PROJECT_ID: !Ref FirebaseProjectId
+          GOOGLE_KEY_SECRET: !Ref GoogleKeySecretArn
+          DEPLOY_HOOK_URL: !Ref DeployHookUrl
+
+  FiguresLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: HasDashboard
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: /aws/lambda/medville-brace-figures
+      RetentionInDays: 30
+
+  FiguresFunction:
+    Type: AWS::Lambda::Function
+    Condition: HasDashboard
+    Properties:
+      FunctionName: medville-brace-figures
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Code: build/figures
+      Role: !GetAtt FiguresRole.Arn
+      Timeout: 120
+      MemorySize: 512
+      KmsKeyArn: !GetAtt OrdersKey.Arn
+      LoggingConfig:
+        LogGroup: !Ref FiguresLogGroup
+        ApplicationLogLevel: ERROR
+        SystemLogLevel: WARN
+        LogFormat: JSON
+      Environment:
+        Variables:
+          ORDERS_TABLE: !Ref OrdersTable
+          BUSINESS_TIME_ZONE: !Ref BusinessTimeZone
+          FIREBASE_PROJECT_ID: !Ref FirebaseProjectId
+          GOOGLE_KEY_SECRET: !Ref GoogleKeySecretArn
+
+  FiguresStream:
+    Type: AWS::Lambda::EventSourceMapping
+    Condition: HasDashboard
+    Properties:
+      FunctionName: !Ref FiguresFunction
+      EventSourceArn: !GetAtt OrdersTable.StreamArn
+      StartingPosition: LATEST
+      BatchSize: 100
+      MaximumBatchingWindowInSeconds: 5
+      MaximumRetryAttempts: 10
+      MaximumRecordAgeInSeconds: 86400
+      BisectBatchOnFunctionError: true
 
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
@@ -411,19 +438,22 @@ Resources:
       RouteKey: POST /orders
       Target: !Sub integrations/${OrdersIntegration}
 
+  # Staff sign in with Firebase Authentication; API Gateway checks the Firebase ID token.
   AdminAuthorizer:
     Type: AWS::ApiGatewayV2::Authorizer
+    Condition: HasDashboard
     Properties:
       ApiId: !Ref HttpApi
       Name: dashboard-sign-in
       AuthorizerType: JWT
       IdentitySource: [$request.header.Authorization]
       JwtConfiguration:
-        Audience: [!Ref AdminClient]
-        Issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${AdminUserPool}
+        Audience: [!Ref FirebaseProjectId]
+        Issuer: !Sub https://securetoken.google.com/${FirebaseProjectId}
 
   AdminIntegration:
     Type: AWS::ApiGatewayV2::Integration
+    Condition: HasDashboard
     Properties:
       ApiId: !Ref HttpApi
       IntegrationType: AWS_PROXY
@@ -432,6 +462,7 @@ Resources:
 
   AdminRoute:
     Type: AWS::ApiGatewayV2::Route
+    Condition: HasDashboard
     Properties:
       ApiId: !Ref HttpApi
       RouteKey: POST /admin
@@ -441,6 +472,7 @@ Resources:
 
   AdminPermission:
     Type: AWS::Lambda::Permission
+    Condition: HasDashboard
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref AdminFunction
@@ -472,14 +504,13 @@ Outputs:
   OrdersState:
     Value: !Ref OrdersEnabled
   AdminEndpoint:
+    Condition: HasDashboard
     Description: The dashboard API. The site derives it from VITE_ORDER_ENDPOINT; set VITE_ADMIN_ENDPOINT only if it differs.
     Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/admin
-  DashboardUserPoolId:
-    Description: For scripts/create-admin.mjs
-    Value: !Ref AdminUserPool
-  DashboardClientId:
-    Description: Put this in VITE_COGNITO_CLIENT_ID
-    Value: !Ref AdminClient
+  FiguresFunctionName:
+    Condition: HasDashboard
+    Description: For npm run figures:rebuild
+    Value: !Ref FiguresFunction
   OrdersTableName:
     Value: !Ref OrdersTable
   SesDkimName1:

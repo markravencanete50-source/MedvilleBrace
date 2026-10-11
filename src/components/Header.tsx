@@ -7,6 +7,7 @@ import Photo from "./Photo";
 import { REGIONS } from "../data/taxonomy";
 import { regionFacets } from "../data/catalog";
 import { COMPANY } from "../data/site";
+import { CONTENT } from "../data/content";
 import { useStore } from "../lib/store";
 
 /*
@@ -82,8 +83,14 @@ export default function Header() {
       <div className="bg-ink text-on-dark-brand">
         <Container className="flex h-9 items-center justify-between gap-4 text-caption">
           <p className="truncate">
-            Free standard shipping on confirmed orders over ${COMPANY.freeShippingFrom}
-            <span className="hidden sm:inline"> · Sizing checked by a person before you pay</span>
+            {CONTENT.settings.notice ? (
+              CONTENT.settings.notice
+            ) : (
+              <>
+                Free standard shipping on confirmed orders over ${COMPANY.freeShippingFrom}
+                <span className="hidden sm:inline"> · Sizing checked by a person before you pay</span>
+              </>
+            )}
           </p>
           <nav className="hidden items-center gap-5 md:flex" aria-label="Help">
             <Link to="/policies/how-ordering-works" className="hover:text-on-dark">How ordering works</Link>

@@ -10,3 +10,5 @@ Thumbs.db
 *.tsbuildinfo
 .wrangler/
 aws/build/
+src/data/content.json
+.vercel/

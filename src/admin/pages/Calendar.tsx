@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { adminApi, AdminApiError, isAdminApiConfigured, itemCount, ORDER_STATUS_LABEL, ORDER_STATUS_TONE, type Order, type OrderStats } from "../api";
 import { useAdminAuth } from "../auth";
+import { fetchFigures, FiguresError } from "../figures";
+import { isFirebaseConfigured } from "../../lib/firebaseConfig";
 import { Badge, Banner, Card, Empty, PageHeader, Spinner } from "../ui";
 import { BarList, ChartFrame, ColumnChart, money, StatTile, toBarItems } from "../charts";
-import { addMonths, formatTime, HOUR_LABELS, monthBounds, monthGrid, prettyDay, prettyMonth, today, WEEKDAY_LABELS, ZONE_LABEL } from "../days";
+import { addMonths, formatDateTime, formatTime, HOUR_LABELS, monthBounds, monthGrid, prettyDay, prettyMonth, today, WEEKDAY_LABELS, ZONE_LABEL } from "../days";
 import OrderDrawer from "../OrderDrawer";
 
 /*
@@ -12,17 +14,19 @@ import OrderDrawer from "../OrderDrawer";
   requests arrived and what they were worth, shaded by how busy it was. Pick
   a day to see that day's figures and the orders themselves.
 
-  Days are business-zone days (src/admin/days.ts), the same days the server
-  counts, so a number here always matches the Overview and the order list.
+  Days are business-zone days (src/admin/days.ts), the same days the AWS
+  figures function counts, so a number here always matches the Overview and
+  the order list. The figures are read from Firestore (src/admin/figures.ts);
+  only the list of that day's orders comes from the order service.
 */
 
 export default function Calendar({ initialDay }: { initialDay?: string | null }) {
-  const { getToken } = useAdminAuth();
-  const connected = isAdminApiConfigured();
+  const connected = isFirebaseConfigured();
   const now = today();
   const [day, setDay] = useState<string>(initialDay || now);
   const [month, setMonth] = useState(() => (initialDay || now).slice(0, 7));
   const [monthStats, setMonthStats] = useState<OrderStats | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [monthError, setMonthError] = useState("");
 
   useEffect(() => {
@@ -37,14 +41,17 @@ export default function Calendar({ initialDay }: { initialDay?: string | null })
     let live = true;
     setMonthStats(null);
     setMonthError("");
-    adminApi
-      .stats(getToken, monthBounds(month))
-      .then((r) => live && setMonthStats(r))
-      .catch((problem: unknown) => live && setMonthError(problem instanceof AdminApiError ? problem.message : "That did not work."));
+    fetchFigures(monthBounds(month))
+      .then((r) => {
+        if (!live) return;
+        setMonthStats(r.stats);
+        setUpdatedAt(r.updatedAt);
+      })
+      .catch((problem: unknown) => live && setMonthError(problem instanceof FiguresError ? problem.message : "That did not work."));
     return () => {
       live = false;
     };
-  }, [getToken, connected, month]);
+  }, [connected, month]);
 
   const grid = useMemo(() => monthGrid(month), [month]);
   const busiest = useMemo(() => Math.max(0, ...Object.values(monthStats?.byDay ?? {}).map((d) => d.orders)), [monthStats]);
@@ -57,7 +64,7 @@ export default function Calendar({ initialDay }: { initialDay?: string | null })
       <>
         {header}
         <Card>
-          <Empty>The calendar will fill in once the order service is connected.</Empty>
+          <Empty>The calendar will fill in once Firebase is connected. Set VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN, VITE_FIREBASE_PROJECT_ID and VITE_FIREBASE_APP_ID, then rebuild.</Empty>
         </Card>
       </>
     );
@@ -157,6 +164,7 @@ export default function Calendar({ initialDay }: { initialDay?: string | null })
             <StatTile label="Items requested" value={monthStats ? monthStats.totals.units : "..."} />
             <StatTile label="Busiest day" value={busiestDay ? busiestDay[1].orders : monthStats ? 0 : "..."} hint={busiestDay ? prettyDay(busiestDay[0], { weekday: "short", day: "numeric", month: "short" }) : undefined} />
           </div>
+          {monthStats && <p className="admin-help mt-3">{updatedAt ? `Figures updated ${formatDateTime(updatedAt.toISOString())}.` : "No order requests have been recorded this month yet."}</p>}
         </div>
 
         <DayPanel day={day} />
@@ -167,7 +175,10 @@ export default function Calendar({ initialDay }: { initialDay?: string | null })
 
 function DayPanel({ day }: { day: string }) {
   const { getToken } = useAdminAuth();
+  const ordersConnected = isAdminApiConfigured();
   const [stats, setStats] = useState<OrderStats | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [figuresError, setFiguresError] = useState("");
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -177,15 +188,25 @@ function DayPanel({ day }: { day: string }) {
     setStats(null);
     setOrders(null);
     setError("");
-    try {
-      const [s, list] = await Promise.all([adminApi.stats(getToken, { from: day, to: day }), adminApi.listOrders(getToken, { from: day, to: day })]);
-      setStats(s);
-      setOrders(list.orders);
-      setNextCursor(list.nextCursor);
-    } catch (problem) {
-      setError(problem instanceof AdminApiError ? problem.message : "That day could not be loaded.");
+    setFiguresError("");
+    /* The figures and the orders come from different services, so one failing leaves the other on screen. */
+    const [figures, list] = await Promise.allSettled([
+      fetchFigures({ from: day, to: day }),
+      ordersConnected ? adminApi.listOrders(getToken, { from: day, to: day }) : Promise.resolve(null),
+    ]);
+    if (figures.status === "fulfilled") {
+      setStats(figures.value.stats);
+      setUpdatedAt(figures.value.updatedAt);
+    } else {
+      setFiguresError(figures.reason instanceof FiguresError ? figures.reason.message : "That day's figures could not be loaded.");
     }
-  }, [getToken, day]);
+    if (list.status === "fulfilled") {
+      setOrders(list.value?.orders ?? []);
+      setNextCursor(list.value?.nextCursor ?? null);
+    } else {
+      setError(list.reason instanceof AdminApiError ? list.reason.message : "That day's orders could not be loaded.");
+    }
+  }, [getToken, day, ordersConnected]);
 
   useEffect(() => {
     void load();
@@ -210,12 +231,12 @@ function DayPanel({ day }: { day: string }) {
         <h2 className="admin-page-title m-0 mt-1" style={{ fontSize: "1.25rem" }}>
           {prettyDay(day, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
         </h2>
-        {error && (
+        {figuresError && (
           <div className="mt-3">
-            <Banner tone="warn">{error}</Banner>
+            <Banner tone="warn">{figuresError}</Banner>
           </div>
         )}
-        {!stats && !error && <Spinner label="Loading the day" />}
+        {!stats && !figuresError && <Spinner label="Loading the day" />}
         {stats && (
           <div className="mt-4 grid grid-cols-2 gap-3">
             <Figure label="Requests" value={String(stats.totals.orders)} />
@@ -224,6 +245,7 @@ function DayPanel({ day }: { day: string }) {
             <Figure label="Cancelled" value={String(stats.totals.cancelled)} />
           </div>
         )}
+        {stats && <p className="admin-help mb-0">{updatedAt ? `Figures updated ${formatDateTime(updatedAt.toISOString())}.` : "No figures recorded for this day."}</p>}
       </Card>
 
       {stats && stats.totals.orders > 0 && (
@@ -252,8 +274,15 @@ function DayPanel({ day }: { day: string }) {
         <div className="border-b px-4 py-3" style={{ borderColor: "var(--a-line)" }}>
           <h3 className="font-display m-0 text-[15px] font-semibold">Orders that day</h3>
         </div>
+        {error && (
+          <div className="px-4 py-3">
+            <Banner tone="warn">{error}</Banner>
+          </div>
+        )}
         {orders === null ? (
           error ? null : <Spinner label="Loading orders" />
+        ) : !ordersConnected ? (
+          <Empty>The list of orders will appear once the order service is connected. Set VITE_ORDER_ENDPOINT (or VITE_ADMIN_ENDPOINT) and rebuild.</Empty>
         ) : !orders.length ? (
           <Empty>No order requests arrived this day.</Empty>
         ) : (

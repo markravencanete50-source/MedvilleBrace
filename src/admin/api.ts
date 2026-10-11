@@ -6,16 +6,22 @@
 
   - Always POST. An order id never appears in a URL, because URLs reach
     browser history, proxy logs and referrer headers.
-  - Always a current Cognito ID token in the Authorization header. API Gateway
-    checks it before the Lambda runs.
-  - Responses never enter the browser HTTP cache. A small in-memory cache
-    only spares repeat reads of the figures while this tab is open. It is
-    cleared on sign-out, token changes and every change.
+  - Always a current Firebase ID token in the Authorization header. API
+    Gateway checks it before the Lambda runs, and the Lambda looks the role up
+    again for every request.
+  - Responses never enter the browser HTTP cache, and nothing is kept in
+    memory either: an order is read when it is asked for and forgotten after.
   - Errors surface as plain sentences. The server never sends detail back and
     this never invents any.
+
+  The figures on the Overview and the Calendar do not come from here. They
+  are read from Firestore (src/admin/figures.ts) and hold no customer data.
 */
-import { ADMIN_ENDPOINT } from "./cognito";
+import { ORDER_ENDPOINT } from "../data/site";
 import { BUSINESS_TIME_ZONE } from "./days";
+
+/* The dashboard API sits on the same API Gateway as the order form, at /admin. */
+export const ADMIN_ENDPOINT: string = import.meta.env?.VITE_ADMIN_ENDPOINT || (ORDER_ENDPOINT ? ORDER_ENDPOINT.replace(/\/orders\/?$/, "/admin") : "");
 
 export const isAdminApiConfigured = () => Boolean(ADMIN_ENDPOINT);
 
@@ -86,6 +92,7 @@ export interface ProductFigures {
   orders: number;
 }
 
+/* The shape the Overview and Calendar draw from. src/admin/figures.ts builds it from the daily Firestore documents. */
 export interface OrderStats {
   timeZone: string;
   from: string;
@@ -117,7 +124,8 @@ export interface AdminUser {
   email: string;
   role: "owner" | "staff" | "none";
   enabled: boolean;
-  status: string;
+  /* True until the person has signed in for the first time. */
+  invited: boolean;
   createdAt: string | null;
 }
 
@@ -125,35 +133,7 @@ export class AdminApiError extends Error {}
 
 type GetToken = () => Promise<string | null>;
 
-const READ_TTL_MS: Record<string, number> = { "orders.stats": 30_000 };
-const CHANGES = new Set(["orders.update", "admins.invite", "admins.setRole", "admins.setEnabled", "admins.delete"]);
-
-const readCache = new Map<string, { expiresAt: number; request: Promise<unknown> }>();
-
-export function clearAdminApiCache() {
-  readCache.clear();
-}
-
 async function call<T>(getToken: GetToken, action: string, payload: Record<string, unknown> = {}): Promise<T> {
-  const ttl = READ_TTL_MS[action] ?? 0;
-  const key = ttl ? `${action}:${JSON.stringify(payload)}` : "";
-  const now = Date.now();
-  if (ttl) {
-    const hit = readCache.get(key);
-    if (hit && hit.expiresAt > now) return hit.request as Promise<T>;
-    for (const [k, v] of readCache) if (v.expiresAt <= now) readCache.delete(k);
-  }
-  const request = callNetwork<T>(getToken, action, payload);
-  if (ttl) {
-    readCache.set(key, { expiresAt: now + ttl, request });
-    request.catch(() => readCache.get(key)?.request === request && readCache.delete(key));
-  } else if (CHANGES.has(action)) {
-    request.then(clearAdminApiCache, () => undefined);
-  }
-  return request;
-}
-
-async function callNetwork<T>(getToken: GetToken, action: string, payload: Record<string, unknown>): Promise<T> {
   if (!ADMIN_ENDPOINT) throw new AdminApiError("The order service is not connected yet. See README.md, Order dashboard.");
   const token = await getToken();
   if (!token) throw new AdminApiError("Please sign in again.");
@@ -186,16 +166,15 @@ export const adminApi = {
   getOrder: (getToken: GetToken, id: string) => call<{ order: Order }>(getToken, "orders.get", { id }),
   updateOrder: (getToken: GetToken, id: string, patch: { status?: OrderStatus; note?: string }) =>
     call<{ ok: true; updatedAt: string; updatedBy: string }>(getToken, "orders.update", { id, ...patch }),
-  stats: (getToken: GetToken, range: { from: string; to: string }) =>
-    call<OrderStats>(getToken, "orders.stats", { ...range, timeZone: BUSINESS_TIME_ZONE }),
+  publish: (getToken: GetToken) => call<{ ok: true; already?: boolean }>(getToken, "site.publish"),
   recordExport: (getToken: GetToken, ids: string[]) => call<{ ok: true }>(getToken, "orders.export", { ids }),
   listAudit: (getToken: GetToken, cursor?: string) => call<{ entries: AuditEntry[]; nextCursor: string | null }>(getToken, "audit.list", cursor ? { cursor } : {}),
   listAdmins: (getToken: GetToken) => call<{ admins: AdminUser[] }>(getToken, "admins.list"),
-  inviteAdmin: (getToken: GetToken, email: string, role: "owner" | "staff") => call<{ ok: true; created: boolean }>(getToken, "admins.invite", { email, role }),
+  inviteAdmin: (getToken: GetToken, email: string, role: "owner" | "staff") => call<{ ok: true; created: boolean; email: string }>(getToken, "admins.invite", { email, role }),
   setAdminRole: (getToken: GetToken, id: string, role: "owner" | "staff" | "none") => call<{ ok: true }>(getToken, "admins.setRole", { id, role }),
   setAdminEnabled: (getToken: GetToken, id: string, enabled: boolean) => call<{ ok: true }>(getToken, "admins.setEnabled", { id, enabled }),
   deleteAdmin: (getToken: GetToken, id: string) => call<{ ok: true }>(getToken, "admins.delete", { id }),
-  resendInvite: (getToken: GetToken, id: string) => call<{ ok: true }>(getToken, "admins.resend", { id }),
+  resendInvite: (getToken: GetToken, id: string) => call<{ ok: true; email: string }>(getToken, "admins.resend", { id }),
 };
 
 export const itemCount = (order: Order) => order.items.reduce((n, l) => n + l.qty, 0);

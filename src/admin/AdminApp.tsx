@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { BarChart3, CalendarDays, ClipboardList, ExternalLink, LogOut, Menu, Moon, MoreHorizontal, ScrollText, Sun, Users, X } from "lucide-react";
+import { BarChart3, CalendarDays, CircleHelp, ClipboardList, ExternalLink, LogOut, Menu, Moon, MoreHorizontal, Package, ScrollText, Store, Sun, Users, X } from "lucide-react";
 import "./admin.css";
 import { AdminAuthProvider, canOpen, useAdminAuth, type AdminRole, type AdminSection } from "./auth";
 import { isAdminApiConfigured } from "./api";
@@ -8,16 +8,23 @@ import { Mark } from "../components/Logo";
 import { usePageMeta } from "../lib/usePageMeta";
 
 /*
-  The order dashboard, at /admin, built on the Medville Diabetes dashboard.
+  The store dashboard, at /admin, built on the Medville Diabetes dashboard.
 
   It is one lazy chunk of the website's own app, so a shopper never downloads
   any of it, and each screen inside is its own chunk again. The address is not
-  a secret and is not treated as one: access is decided by a Cognito sign-in
-  and a role checked again on the server for every request.
+  a secret and is not treated as one: access is decided by a sign-in and a
+  role that is checked again, on the server, for every request.
 
-  Customer data travels only between this page and the AWS account that holds
-  the BAA (Cognito and the order API). Cloudflare serves the page's files and
-  never sees an order.
+  Three services have a part, and none holds more than it needs:
+
+  - Vercel serves this page's files. It never sees an order, a sign-in or a
+    figure; it only hands out the prerendered site and this app.
+  - Firebase handles staff sign-in and the data that holds no customer details:
+    the role on each login, the editable store content (products, questions,
+    store details) and the daily order figures. It loads only after a person
+    opens this page.
+  - AWS, in the account with the BAA, holds the orders. Customer data travels
+    only between this page and the order API there.
 
   The shell is built for a phone first. Under 1024px the navy sidebar becomes
   a drawer, a navy bar at the top names the screen, and a bar at the foot
@@ -43,12 +50,18 @@ const LOADERS = {
   overview: () => import("./pages/Overview"),
   calendar: () => import("./pages/Calendar"),
   orders: () => import("./pages/Orders"),
+  products: () => import("./pages/Products"),
+  faqs: () => import("./pages/Faqs"),
+  settings: () => import("./pages/Settings"),
   team: () => import("./pages/Team"),
   audit: () => import("./pages/Audit"),
 };
 const Overview = screen(LOADERS.overview);
 const Calendar = screen(LOADERS.calendar);
 const Orders = screen(LOADERS.orders);
+const Products = screen(LOADERS.products);
+const Faqs = screen(LOADERS.faqs);
+const Settings = screen(LOADERS.settings);
 const Team = screen(LOADERS.team);
 const Audit = screen(LOADERS.audit);
 
@@ -58,6 +71,9 @@ const NAV: { id: AdminSection; label: string; icon: typeof BarChart3; group: str
   { id: "overview", label: "Overview", icon: BarChart3, group: "Orders" },
   { id: "calendar", label: "Calendar", icon: CalendarDays, group: "Orders" },
   { id: "orders", label: "Orders", icon: ClipboardList, group: "Orders" },
+  { id: "products", label: "Products", icon: Package, group: "Store" },
+  { id: "faqs", label: "Questions", icon: CircleHelp, group: "Store" },
+  { id: "settings", label: "Store details", icon: Store, group: "Store" },
   { id: "team", label: "Team", icon: Users, group: "Account" },
   { id: "audit", label: "Access log", icon: ScrollText, group: "Account" },
 ];
@@ -97,17 +113,14 @@ function Brand() {
   );
 }
 
-type SignInStep = "sign-in" | "new-password" | "forgot" | "reset";
+type SignInStep = "sign-in" | "forgot";
 
 function SignIn() {
-  const { signIn, completeNewPassword, requestReset, confirmReset, pendingApproval, signedOutReason, configured } = useAdminAuth();
+  const { signIn, requestReset, pendingApproval, signedOutReason, configured } = useAdminAuth();
   const toast = useToast();
   const [step, setStep] = useState<SignInStep>("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [next, setNext] = useState("");
-  const [again, setAgain] = useState("");
-  const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -124,40 +137,20 @@ function SignIn() {
     }
   };
 
-  const checkNew = () => {
-    if (next !== again) throw new Error("The two passwords do not match.");
-    if (next.length < 12) throw new Error("Choose a password of at least 12 characters with an upper case letter, a lower case letter and a number.");
-  };
-
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (step === "sign-in") {
       void run(async () => {
-        const kind = await signIn(email, password);
+        setNotice("");
+        const result = await signIn(email, password);
         setPassword("");
-        if (kind === "new-password") setStep("new-password");
-        else toast("Signed in.");
-      });
-    } else if (step === "new-password") {
-      void run(async () => {
-        checkNew();
-        await completeNewPassword(next);
-        toast("Password set. You are signed in.");
-      });
-    } else if (step === "forgot") {
-      void run(async () => {
-        await requestReset(email);
-        setNotice("If that address has an account, a code is on its way to it. Enter it below with a new password.");
-        setStep("reset");
+        if (result === "signed-in") toast("Signed in.");
       });
     } else {
       void run(async () => {
-        checkNew();
-        await confirmReset(email, code, next);
-        setNotice("Password changed. Sign in with the new one.");
-        setNext("");
-        setAgain("");
-        setCode("");
+        await requestReset(email);
+        /* The same words whether or not the address has an account. */
+        setNotice("If that address has an account, an email with a link to choose a new password is on its way. Check your spam folder too.");
         setStep("sign-in");
       });
     }
@@ -165,15 +158,11 @@ function SignIn() {
 
   const titles: Record<SignInStep, [string, string]> = {
     "sign-in": ["Sign in", "Use the email address you were invited with."],
-    "new-password": ["Choose your password", "This is your first sign-in. Replace the temporary password with your own."],
-    forgot: ["Reset your password", "Enter your email address and we will send you a code."],
-    reset: ["Enter the code", "Check your email for the code, then choose a new password."],
+    forgot: ["Reset your password", "Enter your email address and we will send you a link to choose a new password."],
   };
   const action: Record<SignInStep, [string, string]> = {
     "sign-in": ["Sign in", "Signing in"],
-    "new-password": ["Save password and sign in", "Saving"],
-    forgot: ["Send the code", "Sending"],
-    reset: ["Change password", "Saving"],
+    forgot: ["Send the link", "Sending"],
   };
 
   return (
@@ -183,7 +172,9 @@ function SignIn() {
         <div className="admin-signin-card">
           {!configured && (
             <div className="mb-4">
-              <Banner tone="warn">Sign-in is not connected yet. Deploy the AWS stack and set VITE_COGNITO_CLIENT_ID. See README.md, Order dashboard.</Banner>
+              <Banner tone="warn">
+                Sign-in is not connected yet. Set VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN, VITE_FIREBASE_PROJECT_ID and VITE_FIREBASE_APP_ID, then rebuild. See README.md, Order dashboard.
+              </Banner>
             </div>
           )}
           {signedOutReason && step === "sign-in" && (
@@ -206,30 +197,13 @@ function SignIn() {
           <p className="admin-help m-0 mb-5">{titles[step][1]}</p>
 
           <form onSubmit={submit} className="flex flex-col gap-3.5">
-            {(step === "sign-in" || step === "forgot" || step === "reset") && (
-              <Field label="Email address" htmlFor="admin-email">
-                <input id="admin-email" className="admin-input" type="email" autoComplete="username" required readOnly={step === "reset"} value={email} onChange={(event) => setEmail(event.target.value)} />
-              </Field>
-            )}
+            <Field label="Email address" htmlFor="admin-email">
+              <input id="admin-email" className="admin-input" type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} />
+            </Field>
             {step === "sign-in" && (
               <Field label="Password" htmlFor="admin-password">
                 <input id="admin-password" className="admin-input" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} />
               </Field>
-            )}
-            {step === "reset" && (
-              <Field label="Code from the email" htmlFor="admin-code">
-                <input id="admin-code" className="admin-input" inputMode="numeric" autoComplete="one-time-code" required value={code} onChange={(event) => setCode(event.target.value)} />
-              </Field>
-            )}
-            {(step === "new-password" || step === "reset") && (
-              <>
-                <Field label="New password" htmlFor="admin-new" help="At least 12 characters, with an upper case letter, a lower case letter and a number.">
-                  <input id="admin-new" className="admin-input" type="password" autoComplete="new-password" required minLength={12} value={next} onChange={(event) => setNext(event.target.value)} />
-                </Field>
-                <Field label="New password again" htmlFor="admin-again">
-                  <input id="admin-again" className="admin-input" type="password" autoComplete="new-password" required minLength={12} value={again} onChange={(event) => setAgain(event.target.value)} />
-                </Field>
-              </>
             )}
 
             {error && <Banner tone="danger">{error}</Banner>}
@@ -391,6 +365,9 @@ function Shell() {
             {section === "overview" && <Overview openDay={openDay} />}
             {section === "calendar" && <Calendar initialDay={calendarDay} />}
             {section === "orders" && <Orders />}
+            {section === "products" && <Products />}
+            {section === "faqs" && <Faqs />}
+            {section === "settings" && <Settings />}
             {section === "team" && <Team />}
             {section === "audit" && <Audit />}
           </Suspense>

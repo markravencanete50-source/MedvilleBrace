@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && node scripts/prerender.mjs && node scripts/strip-cdn-assets.mjs",
+    "build": "node scripts/pull-content.mjs --strict && tsc -b && vite build && node scripts/prerender.mjs && node scripts/strip-cdn-assets.mjs",
     "preview": "vite preview",
     "catalog:fetch": "node scripts/fetch-catalog.mjs",
     "catalog:build": "node scripts/build-catalog.mjs",
@@ -13,13 +13,16 @@
     "images:optimize": "node scripts/optimize-images.mjs",
     "audit": "node scripts/audit-catalog.mjs",
     "images:upload": "node scripts/upload-cloudinary.mjs",
-    "test:orders": "node --test aws/order.test.mjs aws/admin.test.mjs",
+    "test:orders": "node --test aws/order.test.mjs aws/admin.test.mjs aws/figures.test.mjs",
     "build:orders": "node scripts/build-aws.mjs",
-    "deploy:cloudflare": "npm run build && npx wrangler@4 deploy",
     "deploy:orders": "node scripts/deploy-orders.mjs",
-    "admin:create": "node scripts/create-admin.mjs"
+    "predev": "node scripts/pull-content.mjs",
+    "admin:owner": "node scripts/grant-owner.mjs",
+    "google:key": "node scripts/store-google-key.mjs",
+    "figures:rebuild": "node scripts/figures-rebuild.mjs"
   },
   "dependencies": {
+    "firebase": "^11.10.0",
     "lucide-react": "^0.468.0",
     "minisearch": "^7.1.1",
     "react": "^18.3.1",

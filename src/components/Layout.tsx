@@ -5,6 +5,18 @@ import Footer from "./Footer";
 import CartDrawer from "./CartDrawer";
 import CompareTray from "./CompareTray";
 import FitHelp from "./FitHelp";
+import { productBySlug } from "../data/catalog";
+import { useStore } from "../lib/store";
+
+/* A product the team has hidden since the visitor saved it leaves their cart and comparison list. */
+function DropRemovedProducts() {
+  const { cart, compare, removeLine, toggleCompare } = useStore();
+  useEffect(() => {
+    for (const line of cart) if (!productBySlug(line.slug)) removeLine(line.key);
+    for (const slug of compare) if (!productBySlug(slug)) toggleCompare(slug);
+  }, [cart, compare, removeLine, toggleCompare]);
+  return null;
+}
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -21,6 +33,7 @@ export default function Layout() {
         Skip to content
       </a>
       <ScrollToTop />
+      <DropRemovedProducts />
       <Header />
       <main id="main" className="flex-1">
         <Outlet />

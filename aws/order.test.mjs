@@ -7,7 +7,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createOrderHandler, fingerprint, referenceFor, resolveLine, validateOrder } from "./src/order.mjs";
+import { createOrderHandler, fingerprint, hasUnavailable, referenceFor, resolveLine, validateOrder } from "./src/order.mjs";
+import { applyStoreChanges, createLiveCatalog, variantKey } from "./src/content.mjs";
 import { createStore } from "./src/store.mjs";
 import { notificationMessage, sendNotification } from "./src/notification.mjs";
 
@@ -264,4 +265,205 @@ test("stack: closed by default, encrypted, recoverable, throttled, no request bo
     /* Fixed message strings are fine; any logged value must not be request data. */
     for (const [, args] of src.matchAll(/console\.\w+\(([^)]*)\)/g)) assert.doesNotMatch(args.replace(/"[^"]*"/g, ""), /body|order|customer|email|name|address|\bip\b/i, file);
   }
+});
+
+/* Freezing the inputs makes any attempt to change them throw. */
+function deepFreeze(value) {
+  if (value && typeof value === "object") {
+    Object.freeze(value);
+    for (const v of Object.values(value)) deepFreeze(v);
+  }
+  return value;
+}
+
+test("variantKey: the SKU, or the option values joined when there is none", () => {
+  assert.equal(variantKey({ o: ["M", "Left"], p: 1, s: "TKB-M-L" }), "TKB-M-L");
+  assert.equal(variantKey({ o: ["L", "Left"], p: 1, s: "" }), "L|Left");
+});
+
+test("store changes: hidden products, prices and stock are laid over the built catalog", () => {
+  const built = deepFreeze(structuredClone(CATALOG));
+  const changes = deepFreeze({
+    "test-knee-brace": { variants: { "TKB-M-L": { p: 89.999 }, "TKB-M-R": { a: false }, "L|Left": { p: 120, a: false } } },
+    "test-sleeve": { hidden: true },
+  });
+  const live = applyStoreChanges(built, changes);
+  assert.equal(Object.hasOwn(live, "test-sleeve"), false, "a hidden product cannot be ordered");
+  const v = live["test-knee-brace"].variants;
+  assert.deepEqual(v[0], { o: ["M", "Left"], p: 90, s: "TKB-M-L" }, "the price is rounded to cents");
+  assert.deepEqual(v[1], { o: ["M", "Right"], p: 100, s: "TKB-M-R", a: false });
+  assert.deepEqual(v[2], { o: ["L", "Left"], p: 120, s: "", a: false }, "a variant with no SKU is found by its options");
+  assert.equal(live["test-knee-brace"].name, "Testbrand Knee Brace");
+  assert.deepEqual(built, CATALOG, "the built catalog is not changed");
+  assert.equal(built["test-knee-brace"].variants[0].p, 100);
+});
+
+test("store changes: bad prices, stock flags that are not false, and unknown products are ignored", () => {
+  for (const p of [0, -5, "12", NaN, Infinity, 100000, null, undefined, {}, [], true]) {
+    const live = applyStoreChanges(deepFreeze(structuredClone(CATALOG)), { "test-knee-brace": { variants: { "TKB-M-L": { p } } } });
+    assert.equal(live["test-knee-brace"].variants[0].p, 100, `price ${String(p)}`);
+  }
+  const live = applyStoreChanges(CATALOG, {
+    "test-knee-brace": { hidden: false, variants: { "TKB-M-L": { a: true }, "TKB-M-R": { a: "no" }, NOPE: { p: 1 }, "L|Left": "junk" } },
+    "not-a-product": { hidden: true },
+    constructor: { hidden: true },
+    "test-sleeve": null,
+  });
+  assert.deepEqual(live, CATALOG);
+  assert.equal(applyStoreChanges(CATALOG, undefined), CATALOG);
+  assert.equal(applyStoreChanges(CATALOG, "junk"), CATALOG);
+  assert.equal(applyStoreChanges(CATALOG, null), CATALOG);
+  assert.deepEqual(applyStoreChanges(CATALOG, JSON.parse('{"__proto__": {"hidden": true}}')), CATALOG);
+});
+
+test("store changes: an order is priced from the changed catalog", () => {
+  const live = applyStoreChanges(CATALOG, { "test-knee-brace": { variants: { "TKB-M-R": { p: 95 } } } });
+  assert.equal(validateOrder(good(), live).subtotal, 215.5);
+  assert.equal(validateOrder(good(), CATALOG).subtotal, 225.5);
+});
+
+function liveCatalogWith(reads, over = {}) {
+  let clock = 0;
+  const calls = { n: 0 };
+  const live = createLiveCatalog({
+    catalog: CATALOG,
+    read: () => {
+      const next = reads[Math.min(calls.n, reads.length - 1)];
+      calls.n += 1;
+      return typeof next === "function" ? next() : Promise.resolve(next);
+    },
+    now: () => clock,
+    ...over,
+  });
+  return { live, calls, at: (ms) => (clock = ms) };
+}
+
+const quietly = async (fn) => {
+  const original = console.error;
+  const logged = [];
+  console.error = (...args) => logged.push(args);
+  try {
+    await fn();
+  } finally {
+    console.error = original;
+  }
+  return logged;
+};
+
+test("live catalog: reads at most once a minute and applies what it read", async () => {
+  const { live, calls, at } = liveCatalogWith([{ products: { "test-sleeve": { hidden: true } } }, { products: {} }]);
+  assert.equal(Object.hasOwn(await live(), "test-sleeve"), false);
+  at(59999);
+  assert.equal(Object.hasOwn(await live(), "test-sleeve"), false);
+  assert.equal(calls.n, 1, "inside the minute there is no second read");
+  at(60000);
+  assert.equal(Object.hasOwn(await live(), "test-sleeve"), true, "the hidden product came back");
+  assert.equal(calls.n, 2);
+  const none = liveCatalogWith([null]);
+  assert.deepEqual(await none.live(), CATALOG, "no document means the built catalog");
+});
+
+test("live catalog: a failed read keeps the last good copy and tries again soon", async () => {
+  const { live, calls, at } = liveCatalogWith([
+    { products: { "test-sleeve": { hidden: true } } },
+    () => Promise.reject(new Error("Test Person person1@example.test")),
+    { products: {} },
+  ]);
+  const logged = await quietly(async () => {
+    assert.equal(Object.hasOwn(await live(), "test-sleeve"), false);
+    at(61000);
+    assert.equal(Object.hasOwn(await live(), "test-sleeve"), false, "the failure keeps the previous copy");
+    assert.equal(calls.n, 2);
+    at(65000);
+    await live();
+    assert.equal(calls.n, 2, "not retried at once");
+    at(72000);
+    assert.equal(Object.hasOwn(await live(), "test-sleeve"), true, "retried after ten seconds");
+    assert.equal(calls.n, 3);
+  });
+  assert.doesNotMatch(JSON.stringify(logged), /Test Person|example\.test/, "the failure is logged without detail");
+
+  const first = liveCatalogWith([() => Promise.reject(new Error("down"))]);
+  await quietly(async () => assert.deepEqual(await first.live(), CATALOG, "before any read, the built catalog"));
+});
+
+test("live catalog: requests that arrive together share one read", async () => {
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const { live, calls } = liveCatalogWith([() => gate.then(() => ({ products: { "test-sleeve": { hidden: true } } }))]);
+  const all = Promise.all([live(), live(), live()]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.n, 1, "one request in flight");
+  release();
+  const results = await all;
+  assert.equal(calls.n, 1);
+  assert.ok(results.every((c) => !Object.hasOwn(c, "test-sleeve")));
+  assert.equal(results[0], results[1], "the same copy for all of them");
+});
+
+test("hasUnavailable: only a product or variant that was there and is not now", () => {
+  const live = applyStoreChanges(CATALOG, { "test-sleeve": { hidden: true }, "test-knee-brace": { variants: { "TKB-M-R": { a: false } } } });
+  const line = (slug, sku, options = []) => ({ slug, sku, options, qty: 1 });
+  assert.equal(hasUnavailable({ items: [line("test-sleeve", "")] }, live, CATALOG), true);
+  assert.equal(hasUnavailable({ items: [line("test-knee-brace", "TKB-M-R", ["M", "Right"])] }, live, CATALOG), true);
+  assert.equal(hasUnavailable({ items: [line("test-knee-brace", "TKB-M-L", ["M", "Left"])] }, live, CATALOG), false);
+  assert.equal(hasUnavailable({ items: [line("test-knee-brace", "NOPE", [])] }, live, CATALOG), false, "an unknown variant is junk, not unavailable");
+  assert.equal(hasUnavailable({ items: [line("not-a-product", "")] }, live, CATALOG), false);
+  for (const junk of [null, undefined, {}, { items: "x" }, { items: [null, 5, "x", { slug: 7 }, { slug: "test-knee-brace" }] }]) assert.equal(hasUnavailable(junk, live, CATALOG), false);
+});
+
+test("handler: 409 for a product hidden or a variant out of stock since it was added to the cart, 400 for junk", async () => {
+  let saved = 0;
+  const save = async () => (saved++, { duplicate: false });
+  const hidden = applyStoreChanges(CATALOG, { "test-sleeve": { hidden: true } });
+  const outOfStock = applyStoreChanges(CATALOG, { "test-knee-brace": { variants: { "TKB-M-R": { a: false } } } });
+
+  for (const liveCatalog of [async () => hidden, async () => outOfStock]) {
+    const res = await handlerWith({ save, liveCatalog })(event(good()));
+    assert.equal(res.statusCode, 409);
+    assert.match(json(res).error, /no longer available/);
+    assert.doesNotMatch(res.body, /test-sleeve|TKB|Pat|Example/, "nothing submitted is echoed");
+  }
+  assert.equal(saved, 0, "nothing was saved");
+
+  const changedPrice = applyStoreChanges(CATALOG, { "test-knee-brace": { variants: { "TKB-M-R": { p: 95 } } } });
+  assert.equal((await handlerWith({ save, liveCatalog: async () => changedPrice })(event(good()))).statusCode, 200);
+  assert.equal(saved, 1);
+
+  const junk = handlerWith({ save, liveCatalog: async () => hidden });
+  const wrongForm = good();
+  wrongForm.customer.email = "nope";
+  wrongForm.items = [{ slug: "test-knee-brace", sku: "TKB-M-R", options: ["M", "Right"], qty: 1 }];
+  assert.equal((await junk(event(wrongForm))).statusCode, 400, "a bad form with available items is still a 400");
+  assert.equal((await junk(event({ ...good(), items: [{ slug: "not-a-product", sku: "", options: [], qty: 1 }] }))).statusCode, 400);
+  assert.equal((await junk(event({ ...good(), items: [{ slug: "test-knee-brace", sku: "NOPE", options: [], qty: 1 }] }))).statusCode, 400);
+  assert.equal((await junk(event(null, { raw: "[]" }))).statusCode, 400);
+  assert.equal((await junk(event(null, { raw: "{not json" }))).statusCode, 400);
+  assert.equal(saved, 1);
+});
+
+test("handler: a live catalog that is down does not stop an order from the built prices", async () => {
+  const live = createLiveCatalog({ catalog: CATALOG, read: async () => { throw new Error("down"); } });
+  await quietly(async () => assert.equal((await handlerWith({ liveCatalog: live })(event(good()))).statusCode, 200));
+});
+
+test("stack: the orders table streams keys only, and the intake role is unchanged", () => {
+  const template = readFileSync(new URL("./medville-brace-orders.yaml", import.meta.url), "utf8");
+  const table = template.slice(template.indexOf("\n  OrdersTable:"), template.indexOf("\n  LimitsTable:"));
+  assert.match(table, /StreamSpecification:\n\s*StreamViewType: KEYS_ONLY/);
+  assert.doesNotMatch(template, /StreamViewType: (NEW_IMAGE|OLD_IMAGE|NEW_AND_OLD_IMAGES)/, "no stream carries an order's contents");
+  assert.equal(template.match(/StreamViewType/g)?.length, 1, "only the orders table streams");
+
+  const intakeRole = template.slice(template.indexOf("\n  OrdersRole:"), template.indexOf("\n  AdminRole:"));
+  const actions = [...intakeRole.matchAll(/Action: (\[[^\]]*\]|[\w:]+)/g)].flatMap(([, a]) => a.replace(/[[\]\s]/g, "").split(","));
+  assert.deepEqual(actions.sort(), [
+    "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:UpdateItem",
+    "kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey",
+    "logs:CreateLogStream", "logs:PutLogEvents",
+    "ses:SendEmail", "sts:AssumeRole",
+  ]);
+  assert.doesNotMatch(intakeRole, /secretsmanager|GoogleKeySecretArn|StreamArn|DescribeStream|GetRecords/, "intake cannot reach the Google key or the stream");
+  const fn = template.slice(template.indexOf("\n  OrdersFunction:"), template.indexOf("\n  AdminLogGroup:"));
+  assert.match(fn, /FIREBASE_PROJECT_ID: !Ref FirebaseProjectId/);
+  assert.doesNotMatch(fn, /GOOGLE_KEY_SECRET|DEPLOY_HOOK/, "intake holds no Google key and no deploy hook");
 });

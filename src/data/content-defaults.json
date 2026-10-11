@@ -1,0 +1,44 @@
+{
+  "settings": {
+    "email": "orders@medvillebrace.com",
+    "phone": "",
+    "hours": "Monday to Friday, 9 am to 5 pm Eastern",
+    "freeShippingFrom": 75,
+    "returnDays": 30,
+    "notice": ""
+  },
+  "faqs": [
+    {
+      "q": "How do I pay?",
+      "a": "Send an order request from your cart. We confirm the sizes, stock and final total by email within one business day, with a secure payment link. This website never asks for card details."
+    },
+    {
+      "q": "How do I know which size to order?",
+      "a": "Each product page shows the manufacturer's sizing method. Our measuring guides show how to take the numbers. If you are unsure, add a note to your order request with your measurements and we will check them before you pay."
+    },
+    {
+      "q": "Do you take insurance?",
+      "a": "We do not bill insurance directly. On request we send an itemized receipt with billing codes, so you can submit a claim to your plan yourself. Ask your insurer about coverage before you order."
+    },
+    {
+      "q": "Do I need a prescription?",
+      "a": "Most supports can be ordered without one. Some rigid braces are usually fitted after a prescription, and your insurer may require one for reimbursement. When in doubt, ask your clinician first."
+    },
+    {
+      "q": "Can I return an item that does not fit?",
+      "a": "Yes, when it is unused and in its original packaging. If the size is wrong, contact us first. Most size problems can be solved with an exchange."
+    },
+    {
+      "q": "Which side should I order?",
+      "a": "Many braces are made for the left or the right. Choose the side of your body that needs support. For a hand or wrist brace that means the hand you will wear it on."
+    },
+    {
+      "q": "What does renewed mean?",
+      "a": "A renewed item has been returned, checked, cleaned and tested by the supplier. It works like new and may show light cosmetic wear. It is priced below a new unit."
+    },
+    {
+      "q": "Do you sell to clinics?",
+      "a": "Yes. Clinics, therapists and care teams can ask for volume pricing through the Clinician Partner Program."
+    }
+  ]
+}

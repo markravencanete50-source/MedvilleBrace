@@ -178,9 +178,9 @@ function render(template, p) {
 
 const template = await readFile(join(DIST, "index.html"), "utf8");
 for (const p of pages) {
-  /* <path>.html, not <path>/index.html: Cloudflare serves "shop/knee.html" at
-     /shop/knee, matching the canonical address, whereas a folder index is
-     served at /shop/knee/ behind a redirect. */
+  /* <path>.html, not <path>/index.html: Vercel (cleanUrls in vercel.json) serves
+     "shop/knee.html" at /shop/knee, matching the canonical address, whereas a
+     folder index is served at /shop/knee/ behind a redirect. */
   const file = p.path === "/" ? join(DIST, "index.html") : join(DIST, `${p.path}.html`);
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, render(template, p));

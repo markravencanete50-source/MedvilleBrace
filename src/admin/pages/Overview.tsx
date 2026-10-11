@@ -1,40 +1,45 @@
 import { useEffect, useMemo, useState } from "react";
-import { adminApi, AdminApiError, isAdminApiConfigured, ORDER_STATUS_LABEL, type OrderStats } from "../api";
-import { useAdminAuth } from "../auth";
+import { ORDER_STATUS_LABEL, type OrderStats } from "../api";
+import { fetchFigures, FiguresError } from "../figures";
+import { isFirebaseConfigured } from "../../lib/firebaseConfig";
 import { Banner, Card, Empty, PageHeader, Spinner } from "../ui";
 import { BarList, ChartFrame, ColumnChart, money, StatTile, toBarItems, toTrendPoints, TrendChart } from "../charts";
 import DateRangeFilter, { rangeLabel, recentRange, type DateRange } from "../DateRangeFilter";
-import { HOUR_LABELS, prettyDay, WEEKDAY_LABELS, ZONE_LABEL } from "../days";
+import { formatDateTime, HOUR_LABELS, prettyDay, WEEKDAY_LABELS, ZONE_LABEL } from "../days";
 import { categoryName, productBySlug } from "../../data/catalog";
 
 /*
   How order requests are arriving: totals for a range, a line per day, and
-  where the requests come from. The figures are computed by the server from
-  dates, statuses, products and states only; no names or addresses are read
-  to draw this page.
+  where the requests come from. The figures are read from Firestore, where
+  the AWS figures function keeps one document per day holding counts and sums
+  only. No names or addresses are read to draw this page, and it never asks
+  the order service for anything.
 */
 
 export default function Overview({ openDay }: { openDay: (day: string) => void }) {
-  const { getToken } = useAdminAuth();
   const [range, setRange] = useState<DateRange>(() => recentRange(30));
   const [metric, setMetric] = useState<"orders" | "value">("orders");
   const [stats, setStats] = useState<OrderStats | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [error, setError] = useState("");
-  const connected = isAdminApiConfigured();
+  const connected = isFirebaseConfigured();
 
   useEffect(() => {
     if (!connected || !range.from || !range.to) return;
     let live = true;
     setStats(null);
     setError("");
-    adminApi
-      .stats(getToken, range)
-      .then((result) => live && setStats(result))
-      .catch((problem: unknown) => live && setError(problem instanceof AdminApiError ? problem.message : "That did not work."));
+    fetchFigures({ from: range.from, to: range.to })
+      .then((result) => {
+        if (!live) return;
+        setStats(result.stats);
+        setUpdatedAt(result.updatedAt);
+      })
+      .catch((problem: unknown) => live && setError(problem instanceof FiguresError ? problem.message : "That did not work."));
     return () => {
       live = false;
     };
-  }, [getToken, connected, range]);
+  }, [connected, range]);
 
   const trend = useMemo(() => (stats ? toTrendPoints(stats.byDay, range.from, range.to, metric) : []), [stats, range, metric]);
 
@@ -58,7 +63,7 @@ export default function Overview({ openDay }: { openDay: (day: string) => void }
       <>
         {header}
         <Card>
-          <Empty>Figures will appear here once the order service is connected.</Empty>
+          <Empty>Figures will appear here once Firebase is connected. Set VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN, VITE_FIREBASE_PROJECT_ID and VITE_FIREBASE_APP_ID, then rebuild.</Empty>
         </Card>
       </>
     );
@@ -104,11 +109,7 @@ export default function Overview({ openDay }: { openDay: (day: string) => void }
       {header}
       {rangeControl}
 
-      {stats.truncated && (
-        <div className="mb-4">
-          <Banner tone="warn">This range holds more orders than one summary can count. Choose a shorter range for exact figures.</Banner>
-        </div>
-      )}
+      <p className="admin-help mb-3 mt-0">{updatedAt ? `Figures updated ${formatDateTime(updatedAt.toISOString())}.` : "No order requests have been recorded in this range yet."}</p>
 
       <div className="mb-5 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
         <StatTile label="Order requests" value={stats.totals.orders} hint={selected} />

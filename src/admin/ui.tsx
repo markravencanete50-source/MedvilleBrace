@@ -64,6 +64,38 @@ export function Field({
   );
 }
 
+/* An on and off control. The label sits beside it and is part of the button, so the whole row is the touch target. */
+export function Switch({
+  checked,
+  onChange,
+  label,
+  help,
+  disabled = false,
+  id,
+  ariaLabel,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+  help?: string;
+  disabled?: boolean;
+  id?: string;
+  /* When the visible label alone does not say what the switch is for, such as one switch per row. */
+  ariaLabel?: string;
+}) {
+  return (
+    <div>
+      <button id={id} type="button" role="switch" aria-checked={checked} aria-label={ariaLabel} className="admin-switch" disabled={disabled} onClick={() => onChange(!checked)}>
+        <span className="admin-switch-track" aria-hidden="true">
+          <span className="admin-switch-thumb" />
+        </span>
+        <span className="admin-switch-label">{label}</span>
+      </button>
+      {help && <p className="admin-help">{help}</p>}
+    </div>
+  );
+}
+
 type BadgeTone = "new" | "ok" | "warn" | "danger" | "quiet";
 
 export function Badge({ tone = "quiet", children }: { tone?: BadgeTone; children: React.ReactNode }) {

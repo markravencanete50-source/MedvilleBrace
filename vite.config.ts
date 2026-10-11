@@ -12,6 +12,10 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes("src/data/catalog.json")) return "catalog";
+          /* Firebase is for the dashboard only: its own chunks, so the shop never downloads it. Firestore loads after sign-in. */
+          if (/node_modules\/(@firebase\/firestore|firebase\/firestore)\//.test(id)) return "firebase-firestore";
+          if (/node_modules\/(@firebase\/auth|firebase\/auth)\//.test(id)) return "firebase-auth";
+          if (/node_modules\/(@firebase|firebase|idb)\//.test(id)) return "firebase-core";
           if (id.includes("node_modules")) return "vendor";
         },
       },

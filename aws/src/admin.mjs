@@ -1,29 +1,40 @@
 /*
   The dashboard API: the AWS Lambda behind POST /admin.
 
-  API Gateway checks the Cognito ID token before this runs (a JWT authorizer
-  on the route), so every event here carries verified claims. This file then:
+  Staff sign in with Firebase Authentication. API Gateway checks the Firebase
+  ID token before this runs (a JWT authorizer on the route, issuer
+  securetoken.google.com/<project>), so every event here carries verified
+  claims. Only that token crosses from Google to AWS; no order detail goes
+  the other way. This file then:
 
-  - Reads the person's account and group live (cached for 30 seconds), so a
-    removed or disabled person is refused even while their token is valid.
+  - Reads the person's account and role live from Firebase (cached for 30
+    seconds), so a removed, switched-off or demoted person is refused even
+    while their token is valid, and a token issued before their sessions
+    were ended is refused too.
   - Allows each action only for the roles listed in ACCESS. Staff work with
-    orders; owners also manage accounts and read the access log.
+    orders and can publish store changes; owners also manage accounts and
+    read the access log.
   - Writes an access-log entry for every read, change and export of orders,
     and for every refusal. The log names who and when, never what a customer
     wrote, so it does not become a second copy of the orders.
   - Never logs request bodies or order contents, and never echoes input.
 
   Kept free of AWS imports so it can be tested with plain Node and fake data
-  (aws/admin.test.mjs). admin-index.mjs wires it to DynamoDB and Cognito.
+  (aws/admin.test.mjs). admin-index.mjs wires it to DynamoDB and Firebase.
+
+  The figures on the Overview and Calendar are not served here: figures.mjs
+  copies daily counts (no customer details) to Firestore and the dashboard
+  reads them there.
 */
 import { randomUUID } from "node:crypto";
 import { reply } from "./order.mjs";
-import { dayBounds, daysBetween, localParts, validDay, validTimeZone } from "./days.mjs";
-import { ROLES } from "./users.mjs";
+import { dayBounds, validDay, validTimeZone } from "./days.mjs";
+import { ROLES } from "./identity.mjs";
+import { ORDER_STATUSES } from "./figures.mjs";
 
-export const ORDER_STATUSES = ["new", "contacted", "confirmed", "shipped", "completed", "cancelled"];
+export { ORDER_STATUSES };
 
-const STAFF_ACTIONS = ["orders.list", "orders.get", "orders.update", "orders.stats", "orders.export"];
+const STAFF_ACTIONS = ["orders.list", "orders.get", "orders.update", "orders.export", "site.publish"];
 const OWNER_ACTIONS = [...STAFF_ACTIONS, "audit.list", "admins.list", "admins.invite", "admins.setRole", "admins.setEnabled", "admins.delete", "admins.resend"];
 export const ACCESS = { owner: new Set(OWNER_ACTIONS), staff: new Set(STAFF_ACTIONS) };
 
@@ -34,15 +45,14 @@ export const SHARED_MAILBOXES = new Set([
 ]);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const USER_ID = /^[\w.@+-]{1,128}$/;
+const USER_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const MAX_BODY = 65536;
 const PAGE = 100;
-const MAX_STATS_DAYS = 400;
 const ACTOR_CACHE_MS = 30000;
+const PUBLISH_GAP_MS = 60000;
 
 const text = (v) => (typeof v === "string" ? v : "");
-const money = (n) => Math.round(n * 100) / 100;
 
 /* The fields the dashboard shows, read defensively: nothing in the table is trusted to have a shape. */
 export function orderView(item) {
@@ -79,70 +89,6 @@ export function orderView(item) {
   };
 }
 
-/* Daily figures for the days from..to in tz. Value is the quoted subtotal of orders not cancelled. */
-export function aggregate(items, { from, to, timeZone }) {
-  const totals = { orders: 0, units: 0, value: 0, cancelled: 0 };
-  const byDay = {};
-  const byStatus = {};
-  const byState = {};
-  const byHour = Array(24).fill(0);
-  const byWeekday = Array(7).fill(0);
-  const products = new Map();
-
-  for (const item of items) {
-    const when = localParts(item.createdAt, timeZone);
-    if (!when || when.day < from || when.day > to) continue;
-    const status = ORDER_STATUSES.includes(item.status) ? item.status : "new";
-    const cancelled = status === "cancelled";
-    const lines = Array.isArray(item.items) ? item.items : [];
-    const units = cancelled ? 0 : lines.reduce((n, l) => n + (Number.isInteger(l?.qty) ? l.qty : 0), 0);
-    const value = cancelled || typeof item.subtotal !== "number" ? 0 : item.subtotal;
-
-    totals.orders += 1;
-    totals.units += units;
-    totals.value += value;
-    if (cancelled) totals.cancelled += 1;
-    const day = (byDay[when.day] ??= { orders: 0, units: 0, value: 0 });
-    day.orders += 1;
-    day.units += units;
-    day.value += value;
-    byStatus[status] = (byStatus[status] ?? 0) + 1;
-    byHour[when.hour] += 1;
-    byWeekday[when.weekday] += 1;
-    const state = text(item.customer?.address?.state);
-    if (state) byState[state] = (byState[state] ?? 0) + 1;
-
-    if (cancelled) continue;
-    const seen = new Set();
-    for (const l of lines) {
-      const slug = text(l?.slug);
-      if (!slug || !Number.isInteger(l?.qty)) continue;
-      const p = products.get(slug) ?? { slug, name: text(l.name), units: 0, value: 0, orders: 0 };
-      p.units += l.qty;
-      p.value += (typeof l.unitPrice === "number" ? l.unitPrice : 0) * l.qty;
-      if (!seen.has(slug)) p.orders += 1;
-      seen.add(slug);
-      products.set(slug, p);
-    }
-  }
-
-  for (const d of Object.values(byDay)) d.value = money(d.value);
-  totals.value = money(totals.value);
-  const kept = totals.orders - totals.cancelled;
-  return {
-    timeZone,
-    from,
-    to,
-    totals: { ...totals, averageValue: kept ? money(totals.value / kept) : 0 },
-    byDay,
-    byStatus,
-    byState,
-    byHour,
-    byWeekday,
-    products: [...products.values()].map((p) => ({ ...p, value: money(p.value) })).sort((a, b) => b.units - a.units || b.value - a.value),
-  };
-}
-
 function encodeCursor(key) {
   return key ? Buffer.from(JSON.stringify(key)).toString("base64url") : null;
 }
@@ -159,10 +105,13 @@ function decodeCursor(value, pk) {
 
 /*
   db.send(kind, input) runs one DynamoDB document-client command: "Get",
-  "Query", "Put" or "TransactWrite". users is the account store from users.mjs.
+  "Query", "Put" or "TransactWrite". users is the account store from
+  identity.mjs. publish() starts a rebuild of the website (a Vercel deploy
+  hook), or is null when none is set up.
 */
-export function createAdminHandler({ origins, db, users, ordersTable, auditTable, defaultTimeZone = "America/New_York", statsLimit = 20000, now = () => Date.now() }) {
+export function createAdminHandler({ origins, db, users, ordersTable, auditTable, publish = null, defaultTimeZone = "America/New_York", now = () => Date.now() }) {
   const actors = new Map();
+  let publishedAt = -Infinity;
 
   async function actorFor(username) {
     const hit = actors.get(username);
@@ -258,37 +207,27 @@ export function createAdminHandler({ origins, db, users, ordersTable, auditTable
       return { ok: true, updatedAt: values[":at"], updatedBy: actor.email };
     },
 
-    async "orders.stats"(actor, b) {
-      const timeZone = zoneOf(b);
-      if (!timeZone || !validDay(b.from) || !validDay(b.to) || b.from > b.to) return { status: 400, error: "Invalid date range." };
-      if (daysBetween(b.from, b.to) >= MAX_STATS_DAYS) return { status: 400, error: `Choose a range of ${MAX_STATS_DAYS} days or less.` };
-      const range = rangeQuery(b, timeZone);
-      const items = [];
-      let start;
-      let truncated = false;
-      do {
-        const out = await db.send("Query", {
-          TableName: ordersTable,
-          IndexName: "OrderTimeline",
-          ...range,
-          /* Only what the figures need: no names, emails or street addresses. */
-          ProjectionExpression: "createdAt, #status, subtotal, #items, customer.address.#state",
-          ExpressionAttributeNames: { "#status": "status", "#items": "items", "#state": "state" },
-          ExclusiveStartKey: start,
-        });
-        items.push(...(out.Items || []));
-        start = out.LastEvaluatedKey;
-        if (items.length >= statsLimit) truncated = Boolean(start);
-      } while (start && !truncated);
-      await audit(actor, "orders.stats", { count: items.length });
-      return { ...aggregate(items, { from: b.from, to: b.to, timeZone }), truncated };
-    },
-
     async "orders.export"(actor, b) {
       if (!Array.isArray(b.ids) || !b.ids.length || b.ids.length > 1000 || !b.ids.every((id) => typeof id === "string" && UUID.test(id))) {
         return { status: 400, error: "Invalid export." };
       }
       await audit(actor, "orders.export", { count: b.ids.length });
+      return { ok: true };
+    },
+
+    async "site.publish"(actor) {
+      if (!publish) return { status: 400, error: "Publishing is not set up yet. Store changes appear after the next deploy. See README.md, Store content." };
+      if (now() - publishedAt < PUBLISH_GAP_MS) return { ok: true, already: true };
+      /* Claim the gap first, so two quick clicks start one rebuild; give it back if the hook fails. */
+      const previous = publishedAt;
+      publishedAt = now();
+      try {
+        await publish();
+      } catch (error) {
+        publishedAt = previous;
+        throw error;
+      }
+      await audit(actor, "site.publish");
       return { ok: true };
     },
 
@@ -333,10 +272,12 @@ export function createAdminHandler({ origins, db, users, ordersTable, auditTable
         return { status: 400, error: "That is a shared mailbox. Every person needs their own address, because the access log records who opened each order." };
       }
       if (!ROLES.includes(b.role)) return { status: 400, error: "Choose Owner or Staff." };
+      if (email === actor.email) return { status: 400, error: "You cannot change your own access." };
       const result = await users.invite(email, b.role);
       actors.delete(result.id);
       await audit(actor, "admins.invite", { target: email, detail: b.role });
-      return { ok: true, created: result.created };
+      /* The dashboard now has Firebase email the person a link to choose a password. */
+      return { ok: true, created: result.created, email };
     },
 
     async "admins.setRole"(actor, b) {
@@ -377,9 +318,9 @@ export function createAdminHandler({ origins, db, users, ordersTable, auditTable
       if (typeof b.id !== "string" || !USER_ID.test(b.id)) return { status: 400, error: "Invalid account." };
       const target = await users.lookup(b.id);
       if (!target) return { status: 404, error: "Account not found." };
-      if (!(await users.resend(b.id))) return { status: 400, error: "This person has already signed in. They can use Forgot password on the sign-in page." };
+      if (!target.invited || !target.enabled) return { status: 400, error: "This person has already signed in. They can use Forgot password on the sign-in page." };
       await audit(actor, "admins.resend", { target: target.email });
-      return { ok: true };
+      return { ok: true, email: target.email };
     },
   };
 
@@ -391,8 +332,9 @@ export function createAdminHandler({ origins, db, users, ordersTable, auditTable
     if (!(headers["content-type"] || "").toLowerCase().startsWith("application/json")) return reply(415, origin, { error: "JSON required." });
 
     const claims = event.requestContext?.authorizer?.jwt?.claims || {};
-    const username = claims["cognito:username"];
-    if (claims.token_use !== "id" || typeof username !== "string" || !USER_ID.test(username)) return reply(401, origin, { error: "Please sign in again." });
+    const uid = claims.sub;
+    const signedInAt = Number(claims.auth_time);
+    if (typeof uid !== "string" || !USER_ID.test(uid) || !Number.isFinite(signedInAt)) return reply(401, origin, { error: "Please sign in again." });
 
     let raw = event.body || "";
     if (event.isBase64Encoded) raw = Buffer.from(raw, "base64").toString("utf8");
@@ -408,9 +350,11 @@ export function createAdminHandler({ origins, db, users, ordersTable, auditTable
     if (!action) return reply(400, origin, { error: "Unknown request." });
 
     try {
-      const actor = await actorFor(username);
+      const actor = await actorFor(uid);
+      /* Sessions ended by a role change or switch-off: the token predates them. */
+      if (actor && signedInAt < actor.validSince) return reply(401, origin, { error: "Your session ended. Please sign in again." });
       if (!actor || !actor.enabled || !actor.role || !ACCESS[actor.role]?.has(action)) {
-        const who = actor || { id: username, email: typeof claims.email === "string" ? claims.email : "", role: null };
+        const who = actor || { id: uid, email: typeof claims.email === "string" ? claims.email : "", role: null };
         await audit(who, "access.denied", { detail: action });
         return reply(403, origin, { error: "You do not have access to that." });
       }

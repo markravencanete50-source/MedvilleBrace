@@ -1,21 +1,24 @@
 /*
   Facts about the business, in one place.
 
-  Every value marked PLACEHOLDER must be confirmed by the owner before launch.
+  Contact details and shipping terms come from the dashboard (see COMPANY).
   SITE_ORIGIN is also read by scripts/prerender.mjs for canonical links, the
   sitemap and robots.txt, so connecting the real domain is a one-line change.
 */
+import { CONTENT } from "./content";
+
 export const SITE_ORIGIN = "https://REPLACE-WITH-FINAL-DOMAIN"; // PLACEHOLDER
 
 export const SITE_NAME = "Medville Brace";
 export const SITE_TAGLINE = "Support that fits your recovery.";
 
+/* Contact details and shipping terms are edited in the dashboard (Store details); src/data/content-defaults.json holds the values used until then. */
 export const COMPANY = {
-  email: "orders@medvillebrace.com", // PLACEHOLDER: the inbox that receives order requests
-  phone: "", // PLACEHOLDER: leave empty until a number is live; the site hides it
-  hours: "Monday to Friday, 9 am to 5 pm Eastern", // PLACEHOLDER
-  freeShippingFrom: 75, // PLACEHOLDER: order value, in US dollars
-  returnDays: 30, // PLACEHOLDER
+  email: CONTENT.settings.email,
+  phone: CONTENT.settings.phone,
+  hours: CONTENT.settings.hours,
+  freeShippingFrom: CONTENT.settings.freeShippingFrom,
+  returnDays: CONTENT.settings.returnDays,
   country: "United States",
 };
 
