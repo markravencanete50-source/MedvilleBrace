@@ -1,8 +1,8 @@
 # Cloudflare response headers. Read by Cloudflare Pages and Workers static assets.
 #
 # The Content-Security-Policy allows exactly what the site uses: its own scripts,
-# Google Fonts, photographs from Cloudinary, and order requests to Google Cloud
-# functions. No analytics or third-party scripts are allowed to load.
+# Google Fonts, photographs from Cloudinary, and order requests to the order API
+# on AWS (API Gateway in us-east-1, see aws/). No analytics or third-party scripts are allowed to load.
 
 /*
   X-Content-Type-Options: nosniff
@@ -10,7 +10,7 @@
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Frame-Options: DENY
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://res.cloudinary.com; connect-src 'self' https://*.cloudfunctions.net https://*.run.app; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://res.cloudinary.com; connect-src 'self' https://*.execute-api.us-east-1.amazonaws.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests
 
 # Vite fingerprints these names, so they never change in place.
 /assets/*

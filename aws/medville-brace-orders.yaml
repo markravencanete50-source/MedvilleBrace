@@ -1,0 +1,264 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Medville Brace order requests. Deploy only in the AWS account with the BAA in
+  effect. Every service here (API Gateway, Lambda, DynamoDB, KMS, SES, Secrets
+  Manager, CloudWatch Logs) is HIPAA eligible. Packaged and deployed by
+  scripts/deploy-orders.mjs; Code points at the bundle from scripts/build-aws.mjs.
+
+Parameters:
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Description: Website origins allowed to send order requests, for example https://www.example.com,https://example.com
+  OrdersEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Starts closed. Set to true only when the site, inbox and policies are ready.
+  SenderDomain:
+    Type: String
+    Default: ""
+    Description: Domain to verify in SES for the notification sender (publish the DKIM outputs in DNS). Empty skips it.
+  SenderEmail:
+    Type: String
+    Default: ""
+    Description: From address for new-order notifications, on SenderDomain. Empty turns notifications off.
+  NotifyTo:
+    Type: String
+    Default: ""
+    Description: Comma-separated inboxes for new-order notifications (reference and item count only).
+
+Conditions:
+  HasSenderDomain: !Not [!Equals [!Ref SenderDomain, ""]]
+  CanNotify: !And [!Not [!Equals [!Ref SenderEmail, ""]], !Not [!Equals [!Ref NotifyTo, ""]]]
+
+Resources:
+  OrdersKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Encrypts Medville Brace order requests
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: RootAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: "*"
+
+  OrdersKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/medville-brace-orders
+      TargetKeyId: !Ref OrdersKey
+
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: medville-brace-orders
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt OrdersKey.Arn
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: gsi1pk
+          AttributeType: S
+        - AttributeName: gsi1sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: OrderTimeline
+          KeySchema:
+            - AttributeName: gsi1pk
+              KeyType: HASH
+            - AttributeName: gsi1sk
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  LimitsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: medville-brace-order-limits
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt OrdersKey.Arn
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  RateLimitSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: medville-brace-orders/rate-limit
+      Description: HMAC key for hashed rate-limit counters, so no IP address is stored
+      GenerateSecretString:
+        PasswordLength: 48
+        ExcludePunctuation: true
+
+  SenderEmailIdentity:
+    Type: AWS::SES::EmailIdentity
+    Condition: HasSenderDomain
+    Properties:
+      EmailIdentity: !Ref SenderDomain
+
+  OrdersRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: medville-brace-orders-intake
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource: !GetAtt OrdersTable.Arn
+              - Effect: Allow
+                Action: [dynamodb:UpdateItem]
+                Resource: !GetAtt LimitsTable.Arn
+              - Effect: Allow
+                Action: [kms:Decrypt, kms:Encrypt, kms:GenerateDataKey]
+                Resource: !GetAtt OrdersKey.Arn
+              - !If
+                - CanNotify
+                - Effect: Allow
+                  Action: ses:SendEmail
+                  Resource: "*"
+                - !Ref AWS::NoValue
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/medville-brace-orders:*
+
+  OrdersLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: /aws/lambda/medville-brace-orders
+      RetentionInDays: 30
+
+  OrdersFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: medville-brace-orders
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Code: build/orders
+      Role: !GetAtt OrdersRole.Arn
+      Timeout: 15
+      MemorySize: 256
+      KmsKeyArn: !GetAtt OrdersKey.Arn
+      LoggingConfig:
+        LogGroup: !Ref OrdersLogGroup
+        ApplicationLogLevel: ERROR
+        SystemLogLevel: WARN
+        LogFormat: JSON
+      Environment:
+        Variables:
+          ALLOWED_ORIGINS: !Join [",", !Ref AllowedOrigins]
+          ORDERS_ENABLED: !Ref OrdersEnabled
+          ORDERS_TABLE: !Ref OrdersTable
+          LIMITS_TABLE: !Ref LimitsTable
+          RATE_LIMIT_SECRET: !Join ["", ["{{resolve:secretsmanager:", !Ref RateLimitSecret, ":SecretString}}"]]
+          SENDER_EMAIL: !If [CanNotify, !Ref SenderEmail, ""]
+          NOTIFY_TO: !If [CanNotify, !Ref NotifyTo, ""]
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: medville-brace-orders-api
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowCredentials: false
+        AllowHeaders: [Content-Type]
+        AllowMethods: [POST]
+        AllowOrigins: !Ref AllowedOrigins
+        MaxAge: 3600
+
+  OrdersIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt OrdersFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  OrdersRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /orders
+      Target: !Sub integrations/${OrdersIntegration}
+
+  DefaultStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+
+  OrdersPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref OrdersFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/POST/orders
+
+Outputs:
+  OrderEndpoint:
+    Description: Put this in VITE_ORDER_ENDPOINT
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/orders
+  OrdersState:
+    Value: !Ref OrdersEnabled
+  OrdersTableName:
+    Value: !Ref OrdersTable
+  SesDkimName1:
+    Condition: HasSenderDomain
+    Value: !GetAtt SenderEmailIdentity.DkimDNSTokenName1
+  SesDkimValue1:
+    Condition: HasSenderDomain
+    Value: !GetAtt SenderEmailIdentity.DkimDNSTokenValue1
+  SesDkimName2:
+    Condition: HasSenderDomain
+    Value: !GetAtt SenderEmailIdentity.DkimDNSTokenName2
+  SesDkimValue2:
+    Condition: HasSenderDomain
+    Value: !GetAtt SenderEmailIdentity.DkimDNSTokenValue2
+  SesDkimName3:
+    Condition: HasSenderDomain
+    Value: !GetAtt SenderEmailIdentity.DkimDNSTokenName3
+  SesDkimValue3:
+    Condition: HasSenderDomain
+    Value: !GetAtt SenderEmailIdentity.DkimDNSTokenValue3

@@ -548,9 +548,9 @@ const conditions = [...conditionCount.entries()]
 writeFileSync("src/data/catalog.json", JSON.stringify({ products, conditions, categories: CATEGORY_NAMES }));
 /* Source ids and image addresses stay out of the shipped site; only the image scripts read them. */
 for (const { sources, id, ...rest } of details) writeFileSync(`public/data/p/${rest.slug}.json`, JSON.stringify(rest));
-/* The order function's own copy of names, variants and prices, so it never trusts a price sent by a browser. */
+/* The order Lambda's own copy of names, variants and prices, so it never trusts a price sent by a browser. */
 writeFileSync(
-  "functions/catalog.json",
+  "aws/catalog.json",
   JSON.stringify(
     Object.fromEntries(
       details.map((d) => {

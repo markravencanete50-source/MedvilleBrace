@@ -31,10 +31,10 @@ for (const p of products) {
   if (existsSync("dist") && !existsSync(`dist/product/${p.slug}.html`)) fail(`missing prerendered page ${p.slug}`);
 }
 
-/* The order function prices from its own copy of the catalog; it must match the site's. */
-const serverCatalog = existsSync("functions/catalog.json") ? JSON.parse(readFileSync("functions/catalog.json", "utf8")) : {};
-for (const s of slugs) if (!serverCatalog[s]) fail(`not in functions/catalog.json ${s}`);
-for (const s of Object.keys(serverCatalog)) if (!slugs.has(s)) fail(`stale entry in functions/catalog.json ${s}`);
+/* The order Lambda prices from its own copy of the catalog; it must match the site's. */
+const serverCatalog = existsSync("aws/catalog.json") ? JSON.parse(readFileSync("aws/catalog.json", "utf8")) : {};
+for (const s of slugs) if (!serverCatalog[s]) fail(`not in aws/catalog.json ${s}`);
+for (const s of Object.keys(serverCatalog)) if (!slugs.has(s)) fail(`stale entry in aws/catalog.json ${s}`);
 
 if (existsSync("dist/sitemap.xml")) {
   const sitemap = readFileSync("dist/sitemap.xml", "utf8");
@@ -47,7 +47,7 @@ if (existsSync("dist/sitemap.xml")) {
 const SOURCE = /brace\s*direct|bracedirect/i;
 const LONG_DASH = /\u2014/;
 const SKIP = new Set(["node_modules", "dist", ".cache", ".git"]);
-const TEXT = /\.(ts|tsx|js|mjs|cjs|json|css|html|md|txt|xml)$/;
+const TEXT = /\.(ts|tsx|js|mjs|cjs|json|css|html|md|txt|xml|ya?ml)$/;
 function walk(dir) {
   for (const name of readdirSync(dir)) {
     if (SKIP.has(name)) continue;

@@ -1,25 +1,30 @@
 /*
   Order request intake: validation and the HTTP handler.
 
-  Kept free of Google imports so it can be tested with plain Node and fake
-  data (order.test.js). index.js wires it to Firestore and Cloud Run.
+  Kept free of AWS imports so it can be tested with plain Node and fake data
+  (aws/order.test.mjs). index.mjs wires it to DynamoDB, SES and the API
+  Gateway HTTP API.
 
   Rules this file keeps:
   - Prices and product names come from the server's catalog copy, never from
     the browser, so a tampered request cannot change what we quote.
   - Submitted values are never echoed in errors and never logged.
-  - The same submission id saved twice is one order, not two.
+  - The same submission id saved twice is one order, not two. A reused id with
+    different answers is refused, so changed details are never reported as saved.
 */
+import { createHash } from "node:crypto";
+
 const STATES = new Set("AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY PR".split(" "));
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+const MAX_BODY = 16384;
 
 const str = (v, min, max) => typeof v === "string" && v.trim().length >= min && v.trim().length <= max && !CONTROL.test(v);
 const optional = (v, max) => v === undefined || v === "" || str(v, 1, max);
 
 /* Finds the variant a cart line points at: by SKU when it has one, otherwise by its option values. */
 export function resolveLine(catalog, line) {
-  const product = catalog[line.slug];
+  const product = Object.hasOwn(catalog, line.slug) ? catalog[line.slug] : null;
   if (!product) return null;
   const variant = product.variants.find((v) => (line.sku ? v.s === line.sku : v.o.join("|") === line.options.join("|")));
   if (!variant) return null;
@@ -71,43 +76,69 @@ export function validateOrder(body, catalog) {
 
 export const referenceFor = (id) => `MB-${id.replace(/-/g, "").slice(0, 8).toUpperCase()}`;
 
-export function createOrderHandler({ origins, catalog, save, notify }) {
-  return async (req, res) => {
-    res.set("Cache-Control", "no-store");
-    res.set("X-Content-Type-Options", "nosniff");
-    res.set("Vary", "Origin");
-    const origin = req.get("Origin") || "";
-    if (!origins.includes(origin)) return res.status(403).json({ error: "Request not allowed." });
-    res.set("Access-Control-Allow-Origin", origin);
-    if (req.method === "OPTIONS") {
-      res.set("Access-Control-Allow-Methods", "POST");
-      res.set("Access-Control-Allow-Headers", "Content-Type");
-      res.set("Access-Control-Max-Age", "3600");
-      return res.status(204).send("");
-    }
-    if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed." });
-    if (!(req.get("Content-Type") || "").toLowerCase().startsWith("application/json")) return res.status(415).json({ error: "JSON required." });
-    if (Number(req.get("Content-Length")) > 16384 || (req.rawBody?.length || 0) > 16384) return res.status(413).json({ error: "Request too large." });
+/* Identifies the exact answers saved under a submission id, to tell a retry from a changed request. */
+export const fingerprint = (order) => createHash("sha256").update(JSON.stringify(order)).digest("hex");
 
-    const order = validateOrder(req.body, catalog);
-    if (!order) return res.status(400).json({ error: "Please check the form and your cart, then try again." });
+function reply(statusCode, origin, body, extra = {}) {
+  return {
+    statusCode,
+    headers: {
+      "Cache-Control": "no-store",
+      "Content-Type": "application/json",
+      "X-Content-Type-Options": "nosniff",
+      Vary: "Origin",
+      ...(origin ? { "Access-Control-Allow-Origin": origin } : {}),
+      ...extra,
+    },
+    body: JSON.stringify(body),
+  };
+}
 
+/*
+  Handles an API Gateway HTTP API (payload 2.0) event. The API answers CORS
+  preflight requests itself, so only POST reaches this function.
+
+  save(order, ip) resolves to { duplicate } | { limited } | { conflict };
+  notify(order) runs once per new order and may fail without failing the order.
+*/
+export function createOrderHandler({ origins, enabled, catalog, save, notify }) {
+  return async (event) => {
+    const headers = Object.fromEntries(Object.entries(event.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
+    const origin = headers.origin || "";
+    if (!origins.includes(origin)) return reply(403, "", { error: "Request not allowed." });
+    if (event.requestContext?.http?.method !== "POST") return reply(405, origin, { error: "Method not allowed." });
+    if (!enabled) return reply(503, origin, { error: "Online order requests are not open yet. Please email us." });
+    if (!(headers["content-type"] || "").toLowerCase().startsWith("application/json")) return reply(415, origin, { error: "JSON required." });
+
+    let raw = event.body || "";
+    if (event.isBase64Encoded) raw = Buffer.from(raw, "base64").toString("utf8");
+    if (Buffer.byteLength(raw) > MAX_BODY) return reply(413, origin, { error: "Request too large." });
+    let body;
     try {
-      const result = await save(order, req.ip || "unknown");
-      if (result.limited) {
-        res.set("Retry-After", "3600");
-        return res.status(429).json({ error: "Too many requests. Please try again later or email us." });
-      }
+      body = JSON.parse(raw);
+    } catch {
+      body = null;
+    }
+    const order = validateOrder(body, catalog);
+    if (!order) return reply(400, origin, { error: "Please check the form and your cart, then try again." });
+
+    const ip = event.requestContext?.http?.sourceIp;
+    if (!ip) return reply(503, origin, { error: "Your request could not be saved. Please try again." });
+    try {
+      const result = await save(order, ip);
+      if (result.limited) return reply(429, origin, { error: "Too many requests. Please try again later or email us." }, { "Retry-After": "3600" });
+      if (result.conflict) return reply(409, origin, { error: "This request was already sent. Refresh the page to start a new one." });
       if (!result.duplicate) {
         try {
-          await notify(order.submissionId);
+          await notify(order);
         } catch {
-          /* the order is saved; the notification status records the failure */
+          /* the order is saved; its notificationStatus records the failure */
         }
       }
-      return res.status(200).json({ ok: true, reference: referenceFor(order.submissionId) });
+      return reply(200, origin, { ok: true, reference: referenceFor(order.submissionId) });
     } catch {
-      return res.status(503).json({ error: "Your request could not be saved. Please try again." });
+      console.error("order save failed", { requestId: event.requestContext?.requestId });
+      return reply(503, origin, { error: "Your request could not be saved. Please try again." });
     }
   };
 }

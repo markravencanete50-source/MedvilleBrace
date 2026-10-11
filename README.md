@@ -10,9 +10,9 @@ Built with Vite, React 18, TypeScript, Tailwind CSS 4 and React Router. Static o
 |---|---|---|
 | Cloudflare (Workers static assets) | Serves the website (`dist/`) | No |
 | Cloudinary | Serves product and lifestyle photographs | No |
-| Google Cloud via Firebase (Cloud Run function + Firestore) | Receives and stores order requests | Yes: accept the Google Cloud BAA on this project |
+| AWS (API Gateway + Lambda + DynamoDB, in `aws/`) | Receives and stores order requests | Yes: deploy only in the AWS account with the BAA in effect |
 
-Order data never touches Cloudflare or Cloudinary: the browser posts it straight to the `orderRequest` function.
+Order data never touches Cloudflare or Cloudinary: the browser posts it straight to the order API on AWS. That is why the free Cloudflare plan is enough: Cloudflare offers a BAA only on Enterprise, and it never needs one here. Keep it that way: never proxy the order API through Cloudflare, and never add Cloudflare features that read form input.
 
 ## Run it
 
@@ -68,22 +68,33 @@ git add src/data/cloudinary.json && git commit -m "chore: Cloudinary image map"
 
 Uploads 949 photos under the `medville-brace/` folder and records each one in `src/data/cloudinary.json`. Rerun after a catalog update: only new or changed photos are sent. Once the map has entries, the site requests sized, auto-format images from Cloudinary and the build leaves those local copies out of the deploy.
 
-### 2. Order intake on Google Cloud (Firebase)
+### 2. Order intake on AWS
 
-1. In the client's Google account, create the project, switch it to the Blaze plan, and accept the Google Cloud BAA (only Firestore and Cloud Run functions hold order data, both covered products).
-2. Put its id in `.firebaserc`, copy `functions/.env.example` to `functions/.env` and fill it in.
-3. Create the Firestore database, then:
-   ```bash
-   cd functions && npm install && cd ..
-   firebase functions:secrets:set RATE_LIMIT_SECRET
-   firebase functions:secrets:set RESEND_API_KEY
-   npm run test:functions
-   npm run deploy:functions
-   ```
-4. Put the function's URL in `.env` as `VITE_ORDER_ENDPOINT` (also in the Cloudflare build settings).
-5. In the Firestore console add a TTL policy on `orderLimits.expiresAt`, and turn on Data Access audit logs and point-in-time recovery.
+One CloudFormation stack, `medville-brace-orders` in `us-east-1`, in the AWS account that has the BAA in effect (the same account as Medville Diabetes; the stacks share nothing). It creates:
 
-Orders are read in the Firestore console (`orderRequests`). The notification email carries only the reference and item count.
+- an HTTP API with one route, `POST /orders`, throttled to 10 requests a second;
+- the `medville-brace-orders` Lambda (Node.js 22), which checks the origin, validates the request, prices it from `aws/catalog.json` and saves it;
+- DynamoDB table `medville-brace-orders`, encrypted with its own KMS key, with point-in-time recovery and deletion protection, kept if the stack is ever deleted;
+- DynamoDB table `medville-brace-order-limits`: hashed per-address hourly counters that expire by TTL, so no IP address is stored;
+- an optional SES sender for the "new order request" email (reference and item count only).
+
+The stack starts closed (`OrdersEnabled=false`): the API answers 503 until it is switched on.
+
+```bash
+npm run test:orders
+# AWS CLI v2, signed in to the BAA account; the bucket holds the Lambda code zip
+AWS_DEPLOY_BUCKET=<bucket> ALLOWED_ORIGINS=https://www.<domain>,https://<domain> npm run deploy:orders            # creates a change set to review
+AWS_DEPLOY_BUCKET=<bucket> npm run deploy:orders -- --execute                                                       # or applies it directly
+```
+
+Then:
+
+1. Put the `OrderEndpoint` output in `VITE_ORDER_ENDPOINT` (`.env` and the Cloudflare build settings).
+2. For notifications, deploy again with `SENDER_DOMAIN`, `SENDER_EMAIL` and `NOTIFY_TO`, publish the three DKIM records from the outputs in DNS, and request SES production access (in the SES sandbox the inbox must be verified too).
+3. When the site, inbox and policies are ready, deploy with `ORDERS_ENABLED=true`.
+4. Rerun the deploy after every catalog update, so the Lambda prices from the current catalog.
+
+Orders are read in the DynamoDB console (`medville-brace-orders`, Explore items). Give that access only to the people who handle orders, through IAM.
 
 ### 3. Website on Cloudflare
 
@@ -93,7 +104,7 @@ Either connect the GitHub repository in the Cloudflare dashboard (Workers & Page
 npm run deploy:cloudflare
 ```
 
-`wrangler.jsonc` serves `dist/` with a real 404 page; `public/_headers` sets caching and security headers, including a Content-Security-Policy that allows only Cloudinary images and Google Cloud function requests. Pages are written as `<path>.html`, which Cloudflare serves at the canonical address without a trailing slash.
+`wrangler.jsonc` serves `dist/` with a real 404 page; `public/_headers` sets caching and security headers, including a Content-Security-Policy that allows only Cloudinary images and requests to the order API on AWS. Pages are written as `<path>.html`, which Cloudflare serves at the canonical address without a trailing slash.
 
 ## Before launch
 

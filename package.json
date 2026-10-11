@@ -13,9 +13,10 @@
     "images:optimize": "node scripts/optimize-images.mjs",
     "audit": "node scripts/audit-catalog.mjs",
     "images:upload": "node scripts/upload-cloudinary.mjs",
-    "test:functions": "node --test functions/order.test.js",
+    "test:orders": "node --test aws/order.test.mjs",
+    "build:orders": "node scripts/build-aws.mjs",
     "deploy:cloudflare": "npm run build && npx wrangler@4 deploy",
-    "deploy:functions": "firebase deploy --only functions:orders,firestore:rules"
+    "deploy:orders": "node scripts/deploy-orders.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

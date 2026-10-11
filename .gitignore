@@ -9,4 +9,4 @@ dist/
 Thumbs.db
 *.tsbuildinfo
 .wrangler/
-firebase-debug.log
+aws/build/

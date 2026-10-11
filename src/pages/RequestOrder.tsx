@@ -11,8 +11,8 @@ import { usePageMeta } from "../lib/usePageMeta";
 
 /*
   The order request. Two honest paths, decided by VITE_ORDER_ENDPOINT:
-  - set: the request is posted as JSON to the orderRequest function
-    (functions/), and only a successful response shows the "received" screen
+  - set: the request is posted as JSON to the order Lambda on AWS (aws/),
+    and only a successful response shows the "received" screen
     with the reference it returns;
   - empty: the request is written into an email the visitor sends from their
     own mail app, and the screen says exactly that. There is no path to a
@@ -117,7 +117,7 @@ export default function RequestOrder() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setFailure(res.status === 429 ? "Too many requests from this connection. Please try again in an hour, or email us." : res.status === 400 ? "Something in the form or your cart could not be accepted. Please check it, or email us." : "");
+        setFailure(res.status === 429 ? "Too many requests from this connection. Please try again in an hour, or email us." : res.status === 400 ? "Something in the form or your cart could not be accepted. Please check it, or email us." : res.status === 409 ? "This request was already sent with different details. Refresh the page to send a new one, or email us to change it." : "");
         throw new Error(String(res.status));
       }
       setReference(typeof data.reference === "string" ? data.reference : "");

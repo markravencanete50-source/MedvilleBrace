@@ -25,9 +25,10 @@ Read README.md first. These are the rules that keep the site honest and on brand
 
 ## Hosting
 
-- Cloudflare serves the site, Cloudinary the photos, Google Cloud (Firebase functions + Firestore) the orders. Only Google Cloud may ever receive customer data, and only on the project with the BAA accepted.
-- Never log request bodies in `functions/`, never echo submitted values in errors, never put customer details in the notification email (tests in `functions/order.test.js` guard this).
-- Prices for an order come from `functions/catalog.json` (written by `build-catalog.mjs`), never from the browser.
+- Cloudflare serves the site, Cloudinary the photos, AWS (API Gateway, Lambda, DynamoDB in `aws/`) the orders. Only AWS may ever receive customer data, and only in the account with the BAA in effect. Cloudflare has no BAA on this plan: never route the order API through it, never add Cloudflare features that read form input, never store customer data in Workers, KV or D1.
+- Never log request bodies in `aws/src/`, never echo submitted values in errors, never put customer details in the notification email (tests in `aws/order.test.mjs` guard this).
+- Prices for an order come from `aws/catalog.json` (written by `build-catalog.mjs`), never from the browser. Redeploy the order stack after a catalog update.
+- The order stack starts closed (`OrdersEnabled=false`). Never delete or replace the orders table or its KMS key; both are retained by design.
 - A new external origin (image host, API) must be added to the CSP in `public/_headers`, or browsers will block it.
 - Image URLs go through `src/lib/cdn.ts`; do not hard-code `/products/...` or Cloudinary URLs in components.
 
@@ -40,7 +41,7 @@ Read README.md first. These are the rules that keep the site honest and on brand
 ## Checks before a push
 
 ```bash
-npm run build && npm run audit
+npm run build && npm run audit && npm run test:orders
 ```
 
 Then look at the home, a region page, a product page and the order form at 390px and at desktop width.
