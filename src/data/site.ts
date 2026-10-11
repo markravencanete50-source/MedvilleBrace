@@ -19,5 +19,9 @@ export const COMPANY = {
   country: "United States",
 };
 
+/* The order dashboard counts days in this time zone, so a day matches the support hours above.
+   Keep it equal to BusinessTimeZone on the AWS stack. PLACEHOLDER: confirm with the owner. */
+export const BUSINESS_TIME_ZONE = "America/New_York";
+
 /* Where the Request Order form posts. Empty means the email fallback. */
 export const ORDER_ENDPOINT: string = import.meta.env?.VITE_ORDER_ENDPOINT ?? "";

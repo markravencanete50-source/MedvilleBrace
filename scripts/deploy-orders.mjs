@@ -1,5 +1,5 @@
 /*
-  Deploys the order stack (aws/medville-brace-orders.yaml) with the AWS CLI v2.
+  Deploys the order stack (aws/medville-brace-orders.yaml: order intake and the dashboard API) with the AWS CLI v2.
 
   Run it signed in to the AWS account that has the BAA in effect:
 
@@ -15,6 +15,7 @@
     SENDER_DOMAIN     domain to verify in SES
     SENDER_EMAIL      notification From address
     NOTIFY_TO         comma-separated order inboxes
+    BUSINESS_TIME_ZONE  dashboard day boundaries, default America/New_York
     AWS_REGION        defaults to us-east-1, the region in the site's CSP
 */
 import { spawnSync } from "node:child_process";
@@ -54,6 +55,7 @@ const overrides = Object.entries({
   SenderDomain: env.SENDER_DOMAIN,
   SenderEmail: env.SENDER_EMAIL,
   NotifyTo: env.NOTIFY_TO,
+  BusinessTimeZone: env.BUSINESS_TIME_ZONE,
 })
   .filter(([, v]) => v !== undefined)
   .map(([k, v]) => `${k}=${v}`);

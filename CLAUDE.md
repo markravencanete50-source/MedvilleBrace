@@ -25,12 +25,22 @@ Read README.md first. These are the rules that keep the site honest and on brand
 
 ## Hosting
 
-- Cloudflare serves the site, Cloudinary the photos, AWS (API Gateway, Lambda, DynamoDB in `aws/`) the orders. Only AWS may ever receive customer data, and only in the account with the BAA in effect. Cloudflare has no BAA on this plan: never route the order API through it, never add Cloudflare features that read form input, never store customer data in Workers, KV or D1.
+- Cloudflare serves the site, Cloudinary the photos, AWS (API Gateway, Lambda, DynamoDB and Cognito in `aws/`) the orders and the order dashboard. Only AWS may ever receive customer data, and only in the account with the BAA in effect. Cloudflare has no BAA on this plan: never route the order API through it, never add Cloudflare features that read form input, never store customer data in Workers, KV or D1.
 - Never log request bodies in `aws/src/`, never echo submitted values in errors, never put customer details in the notification email (tests in `aws/order.test.mjs` guard this).
 - Prices for an order come from `aws/catalog.json` (written by `build-catalog.mjs`), never from the browser. Redeploy the order stack after a catalog update.
-- The order stack starts closed (`OrdersEnabled=false`). Never delete or replace the orders table or its KMS key; both are retained by design.
+- The order stack starts closed (`OrdersEnabled=false`). Never delete or replace the orders table, the access-log table, the dashboard user pool or the KMS key; all are retained by design.
 - A new external origin (image host, API) must be added to the CSP in `public/_headers`, or browsers will block it.
 - Image URLs go through `src/lib/cdn.ts`; do not hard-code `/products/...` or Cloudinary URLs in components.
+
+## Order dashboard (`src/admin/`, `aws/src/admin.mjs`)
+
+- Built on the Medville Diabetes dashboard (shell, drawer, charts, access log), but with Medville Brace's palette: navy and cyan, the action colour is cyan under navy type, and danger uses the site's form error red. No orange. The palette lives only in `src/admin/admin.css`.
+- Sign-in is Cognito (`src/admin/cognito.ts`, plain fetch, no SDK). Roles are the Cognito groups `owner` and `staff`; the Lambda reads them live, never from the token alone. Keep `ACCESS` in `aws/src/admin.mjs` and `ROLE_ACCESS` in `src/admin/auth.tsx` in step.
+- Every read, change and export of orders writes an access-log entry. A new action must too. Log entries never hold customer details.
+- Figures (`orders.stats`) read dates, statuses, products and states only. Never add names, emails or street addresses to its projection.
+- Order ids never go into a URL: POST only, and an order opens in a drawer, not at a route.
+- Days are business-zone days (`BUSINESS_TIME_ZONE` in `src/data/site.ts`, `BusinessTimeZone` on the stack). Keep the two equal.
+- Tests: `aws/admin.test.mjs`. To look at the screens without AWS, run the real handler behind a local stand-in for Cognito and API Gateway with invented orders; never point a local build at the real stack with real orders on screen in a shared session.
 
 ## Ordering
 
@@ -44,4 +54,4 @@ Read README.md first. These are the rules that keep the site honest and on brand
 npm run build && npm run audit && npm run test:orders
 ```
 
-Then look at the home, a region page, a product page and the order form at 390px and at desktop width.
+`test:orders` runs both `aws/order.test.mjs` and `aws/admin.test.mjs`. Then look at the home, a region page, a product page and the order form at 390px and at desktop width.

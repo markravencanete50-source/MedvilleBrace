@@ -10,9 +10,9 @@ Built with Vite, React 18, TypeScript, Tailwind CSS 4 and React Router. Static o
 |---|---|---|
 | Cloudflare (Workers static assets) | Serves the website (`dist/`) | No |
 | Cloudinary | Serves product and lifestyle photographs | No |
-| AWS (API Gateway + Lambda + DynamoDB, in `aws/`) | Receives and stores order requests | Yes: deploy only in the AWS account with the BAA in effect |
+| AWS (API Gateway + Lambda + DynamoDB + Cognito, in `aws/`) | Receives and stores order requests; serves the order dashboard's data and sign-in | Yes: deploy only in the AWS account with the BAA in effect |
 
-Order data never touches Cloudflare or Cloudinary: the browser posts it straight to the order API on AWS. That is why the free Cloudflare plan is enough: Cloudflare offers a BAA only on Enterprise, and it never needs one here. Keep it that way: never proxy the order API through Cloudflare, and never add Cloudflare features that read form input.
+Order data never touches Cloudflare or Cloudinary: the browser posts it straight to the order API on AWS, and the dashboard reads it straight from there too. That is why the free Cloudflare plan is enough: Cloudflare offers a BAA only on Enterprise, and it never needs one here. Keep it that way: never proxy the order API through Cloudflare, and never add Cloudflare features that read form input.
 
 ## Run it
 
@@ -38,6 +38,28 @@ There is no payment on the site. The cart becomes an order request; the team con
 
 - Set `VITE_ORDER_ENDPOINT` (see `.env.example`) to a URL that accepts the JSON request. Only a successful response shows the "Request received" screen.
 - With it empty, the request is written into an email the visitor sends from their own mail app, to `COMPANY.email` in `src/data/site.ts`. The screen says plainly that nothing has been received until that email is sent.
+
+## Order dashboard
+
+At `/admin`, modelled on the Medville Diabetes dashboard. It is part of the same app but loads as its own chunks, so shoppers never download it; the page is `noindex` and never cached.
+
+- **Overview**: totals for any date range (requests, value quoted, average request, items, requests waiting on the team, busiest day), a line of requests or value per day, time of day, day of the week, status, most requested products, brands, categories and ship-to states. Clicking a day on the line opens it in the calendar.
+- **Calendar**: one month at a time, each day showing its number of requests and value, shaded by how busy it was. Picking a day shows that day's figures (requests, value, items, cancelled, hour by hour, status, products) and its orders.
+- **Orders**: every request, newest first, filtered by date range and status and searched in the browser. An order opens in a side panel: customer, ship-to address, items with options, SKUs and prices, the customer's note, a status (new, contacted, confirmed, shipped, completed, cancelled) and an internal note. Export to CSV asks first and is logged.
+- **Team** (owners only): invite people as Owner or Staff, change roles, switch accounts off, remove them. Shared mailboxes are refused.
+- **Access log** (owners only): who opened, changed or downloaded orders, who changed the team, and who was refused.
+
+Days are counted in `BUSINESS_TIME_ZONE` (`src/data/site.ts`, default America/New_York, matching the support hours) on every screen and on the server.
+
+How it is protected:
+
+- Sign-in is an Amazon Cognito user pool in the BAA account. Accounts are created only by an owner (or `npm run admin:create` for the first one); Cognito emails a temporary password and the person chooses their own at first sign-in. Passwords are at least 12 characters. Sessions live in the tab's session storage and end after 20 idle minutes.
+- `POST /admin` on the same API Gateway requires a valid Cognito ID token (JWT authorizer). The `medville-brace-admin` Lambda then reads the person's account and group from Cognito on every request (cached 30 seconds), so a removed or switched-off person is refused at once. Staff can work with orders and figures; only owners reach Team and the access log.
+- Every order list, order opened, change, figure and export is written to `medville-brace-audit` (KMS encrypted, point-in-time recovery, deletion protection). The log names who and when, never what a customer wrote.
+- The figures are computed on the server from dates, statuses, products and states only; no names or addresses are read for them.
+- No order id ever appears in a URL: everything is a POST, and an order opens in a panel, not at its own address.
+
+Two-step sign-in (TOTP) is not switched on yet; Cognito supports it and it is the next thing to add if the team wants it.
 
 ## Catalog pipeline
 
@@ -76,7 +98,8 @@ One CloudFormation stack, `medville-brace-orders` in `us-east-1`, in the AWS acc
 - the `medville-brace-orders` Lambda (Node.js 22), which checks the origin, validates the request, prices it from `aws/catalog.json` and saves it;
 - DynamoDB table `medville-brace-orders`, encrypted with its own KMS key, with point-in-time recovery and deletion protection, kept if the stack is ever deleted;
 - DynamoDB table `medville-brace-order-limits`: hashed per-address hourly counters that expire by TTL, so no IP address is stored;
-- an optional SES sender for the "new order request" email (reference and item count only).
+- an optional SES sender for the "new order request" email (reference and item count only);
+- the order dashboard's back end: the `medville-brace-dashboard` Cognito user pool (groups `owner` and `staff`), the `POST /admin` route with a JWT authorizer, the `medville-brace-admin` Lambda and the `medville-brace-audit` table.
 
 The stack starts closed (`OrdersEnabled=false`): the API answers 503 until it is switched on.
 
@@ -89,22 +112,23 @@ AWS_DEPLOY_BUCKET=<bucket> npm run deploy:orders -- --execute                   
 
 Then:
 
-1. Put the `OrderEndpoint` output in `VITE_ORDER_ENDPOINT` (`.env` and the Cloudflare build settings).
-2. For notifications, deploy again with `SENDER_DOMAIN`, `SENDER_EMAIL` and `NOTIFY_TO`, publish the three DKIM records from the outputs in DNS, and request SES production access (in the SES sandbox the inbox must be verified too).
-3. When the site, inbox and policies are ready, deploy with `ORDERS_ENABLED=true`.
-4. Rerun the deploy after every catalog update, so the Lambda prices from the current catalog.
+1. Put the `OrderEndpoint` output in `VITE_ORDER_ENDPOINT` and the `DashboardClientId` output in `VITE_COGNITO_CLIENT_ID` (`.env` and the Cloudflare build settings). The dashboard finds its API at the same address with `/admin` in place of `/orders`.
+2. Create the first owner: `npm run admin:create -- name@example.com`. They sign in at `<site>/admin` and invite everyone else from Team.
+3. For notifications, deploy again with `SENDER_DOMAIN`, `SENDER_EMAIL` and `NOTIFY_TO`, publish the three DKIM records from the outputs in DNS, and request SES production access (in the SES sandbox the inbox must be verified too).
+4. When the site, inbox and policies are ready, deploy with `ORDERS_ENABLED=true`.
+5. Rerun the deploy after every catalog update, so the Lambda prices from the current catalog.
 
-Orders are read in the DynamoDB console (`medville-brace-orders`, Explore items). Give that access only to the people who handle orders, through IAM.
+The team reads and manages orders in the dashboard at `/admin`. Keep DynamoDB console access for the account administrator only: reads made there do not reach the access log.
 
 ### 3. Website on Cloudflare
 
-Either connect the GitHub repository in the Cloudflare dashboard (Workers & Pages, build command `npm run build`, deploy command `npx wrangler deploy`, environment variable `VITE_ORDER_ENDPOINT`), or deploy from this machine:
+Either connect the GitHub repository in the Cloudflare dashboard (Workers & Pages, build command `npm run build`, deploy command `npx wrangler deploy`, environment variables `VITE_ORDER_ENDPOINT` and `VITE_COGNITO_CLIENT_ID`), or deploy from this machine:
 
 ```bash
 npm run deploy:cloudflare
 ```
 
-`wrangler.jsonc` serves `dist/` with a real 404 page; `public/_headers` sets caching and security headers, including a Content-Security-Policy that allows only Cloudinary images and requests to the order API on AWS. Pages are written as `<path>.html`, which Cloudflare serves at the canonical address without a trailing slash.
+`wrangler.jsonc` serves `dist/` with a real 404 page; `public/_headers` sets caching and security headers, including a Content-Security-Policy that allows only Cloudinary images, requests to the order API on AWS and dashboard sign-in through Cognito. Pages are written as `<path>.html`, which Cloudflare serves at the canonical address without a trailing slash.
 
 ## Before launch
 

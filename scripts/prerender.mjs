@@ -140,6 +140,7 @@ add({
 for (const p of policies.POLICIES) add({ path: `/policies/${p.slug}`, title: title(p.title), description: p.description });
 /* Private pages: written so a direct visit gets the right title, kept out of the sitemap. */
 for (const [path, t] of [["/cart", "Your cart"], ["/request-order", "Send an order request"], ["/compare", "Compare products"]]) add({ path, title: title(t), description: DEFAULT_DESC, noindex: true });
+add({ path: "/admin", title: title("Order dashboard"), description: "Medville Brace order dashboard.", noindex: true });
 
 function render(template, p) {
   const url = `${ORIGIN}${p.path === "/" ? "/" : p.path}`;
@@ -197,6 +198,6 @@ const sitemap = [
   "",
 ].join("\n");
 await writeFile(join(DIST, "sitemap.xml"), sitemap);
-await writeFile(join(DIST, "robots.txt"), `User-agent: *\nAllow: /\nDisallow: /cart\nDisallow: /request-order\nDisallow: /compare\n\nSitemap: ${ORIGIN}/sitemap.xml\n`);
+await writeFile(join(DIST, "robots.txt"), `User-agent: *\nAllow: /\nDisallow: /cart\nDisallow: /request-order\nDisallow: /compare\nDisallow: /admin\n\nSitemap: ${ORIGIN}/sitemap.xml\n`);
 
 console.log(`prerendered ${pages.length} pages, sitemap ${indexable.length} addresses`);

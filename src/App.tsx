@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import Home from "./pages/Home";
@@ -12,10 +13,21 @@ import { GuidePage, GuidesIndex } from "./pages/Guides";
 import { About, Brands, Clinicians, Contact, Faq, PolicyPage } from "./pages/Info";
 import NotFound from "./pages/NotFound";
 
+/* The order dashboard: its own chunk, outside the shop layout, never downloaded by a shopper. */
+const AdminApp = lazy(() => import("./admin/AdminApp"));
+
 /* Every address the site answers. scripts/prerender.mjs mirrors this list. */
 export default function App() {
   return (
     <Routes>
+      <Route
+        path="admin"
+        element={
+          <Suspense fallback={null}>
+            <AdminApp />
+          </Suspense>
+        }
+      />
       <Route element={<Layout />}>
         <Route index element={<Home />} />
         <Route path="shop" element={<Shop mode="all" />} />

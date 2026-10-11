@@ -79,7 +79,7 @@ export const referenceFor = (id) => `MB-${id.replace(/-/g, "").slice(0, 8).toUpp
 /* Identifies the exact answers saved under a submission id, to tell a retry from a changed request. */
 export const fingerprint = (order) => createHash("sha256").update(JSON.stringify(order)).digest("hex");
 
-function reply(statusCode, origin, body, extra = {}) {
+export function reply(statusCode, origin, body, extra = {}) {
   return {
     statusCode,
     headers: {

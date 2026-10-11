@@ -1,8 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Medville Brace order requests. Deploy only in the AWS account with the BAA in
-  effect. Every service here (API Gateway, Lambda, DynamoDB, KMS, SES, Secrets
-  Manager, CloudWatch Logs) is HIPAA eligible. Packaged and deployed by
+  Medville Brace order requests and the order dashboard. Deploy only in the AWS
+  account with the BAA in effect. Every service here (API Gateway, Lambda,
+  DynamoDB, KMS, SES, Secrets Manager, Cognito, CloudWatch Logs) is HIPAA
+  eligible. Packaged and deployed by
   scripts/deploy-orders.mjs; Code points at the bundle from scripts/build-aws.mjs.
 
 Parameters:
@@ -26,6 +27,10 @@ Parameters:
     Type: String
     Default: ""
     Description: Comma-separated inboxes for new-order notifications (reference and item count only).
+  BusinessTimeZone:
+    Type: String
+    Default: America/New_York
+    Description: IANA time zone that decides which calendar day an order belongs to on the dashboard.
 
 Conditions:
   HasSenderDomain: !Not [!Equals [!Ref SenderDomain, ""]]
@@ -118,6 +123,115 @@ Resources:
         PasswordLength: 48
         ExcludePunctuation: true
 
+  AuditTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: medville-brace-audit
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt OrdersKey.Arn
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: gsi1pk
+          AttributeType: S
+        - AttributeName: gsi1sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: AuditTimeline
+          KeySchema:
+            - AttributeName: gsi1pk
+              KeyType: HASH
+            - AttributeName: gsi1sk
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # Dashboard sign-in. Staff accounts only: no customer is ever a user here.
+  # Accounts are created by an owner from the dashboard (or by
+  # scripts/create-admin.mjs for the first owner); nobody can sign themselves up.
+  AdminUserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: medville-brace-dashboard
+      DeletionProtection: ACTIVE
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      UsernameConfiguration:
+        CaseSensitive: false
+      MfaConfiguration: "OFF"
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          TemporaryPasswordValidityDays: 7
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+        InviteMessageTemplate:
+          EmailSubject: Your Medville Brace dashboard account
+          EmailMessage: !Sub
+            - >-
+              You now have access to the Medville Brace order dashboard at ${Site}/admin.
+              Sign in with {username} and this temporary password: {####}
+              You will then choose your own password. The temporary password works for 7 days.
+            - Site: !Select [0, !Ref AllowedOrigins]
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_CODE
+        EmailSubject: Your Medville Brace dashboard code
+        EmailMessage: "Your Medville Brace dashboard code is {####}. If you did not ask for it, you can ignore this email."
+
+  OwnerGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      UserPoolId: !Ref AdminUserPool
+      GroupName: owner
+      Description: Orders, figures, staff accounts and the access log
+
+  StaffGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      UserPoolId: !Ref AdminUserPool
+      GroupName: staff
+      Description: Orders and figures only
+
+  AdminClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref AdminUserPool
+      ClientName: medville-brace-dashboard
+      GenerateSecret: false
+      ExplicitAuthFlows: [ALLOW_USER_PASSWORD_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AuthSessionValidity: 10
+      AccessTokenValidity: 30
+      IdTokenValidity: 30
+      RefreshTokenValidity: 12
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: hours
+      ReadAttributes: [email, email_verified]
+
   SenderEmailIdentity:
     Type: AWS::SES::EmailIdentity
     Condition: HasSenderDomain
@@ -157,6 +271,53 @@ Resources:
                 Action: [logs:CreateLogStream, logs:PutLogEvents]
                 Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/medville-brace-orders:*
 
+  AdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: medville-brace-dashboard
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:UpdateItem]
+                Resource: !GetAtt OrdersTable.Arn
+              - Effect: Allow
+                Action: [dynamodb:Query]
+                Resource: !Sub ${OrdersTable.Arn}/index/OrderTimeline
+              - Effect: Allow
+                Action: [dynamodb:PutItem]
+                Resource: !GetAtt AuditTable.Arn
+              - Effect: Allow
+                Action: [dynamodb:Query]
+                Resource: !Sub ${AuditTable.Arn}/index/AuditTimeline
+              - Effect: Allow
+                Action: [kms:Decrypt, kms:Encrypt, kms:GenerateDataKey]
+                Resource: !GetAtt OrdersKey.Arn
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:AdminListGroupsForUser
+                  - cognito-idp:ListUsers
+                  - cognito-idp:ListUsersInGroup
+                  - cognito-idp:AdminCreateUser
+                  - cognito-idp:AdminAddUserToGroup
+                  - cognito-idp:AdminRemoveUserFromGroup
+                  - cognito-idp:AdminEnableUser
+                  - cognito-idp:AdminDisableUser
+                  - cognito-idp:AdminDeleteUser
+                  - cognito-idp:AdminUserGlobalSignOut
+                Resource: !GetAtt AdminUserPool.Arn
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/medville-brace-admin:*
+
   OrdersLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Retain
@@ -191,6 +352,38 @@ Resources:
           SENDER_EMAIL: !If [CanNotify, !Ref SenderEmail, ""]
           NOTIFY_TO: !If [CanNotify, !Ref NotifyTo, ""]
 
+  AdminLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: /aws/lambda/medville-brace-admin
+      RetentionInDays: 30
+
+  AdminFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: medville-brace-admin
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Code: build/admin
+      Role: !GetAtt AdminRole.Arn
+      Timeout: 20
+      MemorySize: 512
+      KmsKeyArn: !GetAtt OrdersKey.Arn
+      LoggingConfig:
+        LogGroup: !Ref AdminLogGroup
+        ApplicationLogLevel: ERROR
+        SystemLogLevel: WARN
+        LogFormat: JSON
+      Environment:
+        Variables:
+          ALLOWED_ORIGINS: !Join [",", !Ref AllowedOrigins]
+          ORDERS_TABLE: !Ref OrdersTable
+          AUDIT_TABLE: !Ref AuditTable
+          USER_POOL_ID: !Ref AdminUserPool
+          BUSINESS_TIME_ZONE: !Ref BusinessTimeZone
+
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
@@ -198,7 +391,7 @@ Resources:
       ProtocolType: HTTP
       CorsConfiguration:
         AllowCredentials: false
-        AllowHeaders: [Content-Type]
+        AllowHeaders: [Authorization, Content-Type]
         AllowMethods: [POST]
         AllowOrigins: !Ref AllowedOrigins
         MaxAge: 3600
@@ -217,6 +410,42 @@ Resources:
       ApiId: !Ref HttpApi
       RouteKey: POST /orders
       Target: !Sub integrations/${OrdersIntegration}
+
+  AdminAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref HttpApi
+      Name: dashboard-sign-in
+      AuthorizerType: JWT
+      IdentitySource: [$request.header.Authorization]
+      JwtConfiguration:
+        Audience: [!Ref AdminClient]
+        Issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${AdminUserPool}
+
+  AdminIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt AdminFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  AdminRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /admin
+      AuthorizationType: JWT
+      AuthorizerId: !Ref AdminAuthorizer
+      Target: !Sub integrations/${AdminIntegration}
+
+  AdminPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AdminFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/POST/admin
 
   DefaultStage:
     Type: AWS::ApiGatewayV2::Stage
@@ -242,6 +471,15 @@ Outputs:
     Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/orders
   OrdersState:
     Value: !Ref OrdersEnabled
+  AdminEndpoint:
+    Description: The dashboard API. The site derives it from VITE_ORDER_ENDPOINT; set VITE_ADMIN_ENDPOINT only if it differs.
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/admin
+  DashboardUserPoolId:
+    Description: For scripts/create-admin.mjs
+    Value: !Ref AdminUserPool
+  DashboardClientId:
+    Description: Put this in VITE_COGNITO_CLIENT_ID
+    Value: !Ref AdminClient
   OrdersTableName:
     Value: !Ref OrdersTable
   SesDkimName1:

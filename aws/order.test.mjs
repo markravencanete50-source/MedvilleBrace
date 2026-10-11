@@ -249,12 +249,15 @@ test("stack: closed by default, encrypted, recoverable, throttled, no request bo
   assert.match(template, /OrdersEnabled:\s*\n\s*Type: String\s*\n\s*Default: "false"/);
   assert.match(template, /TableName: medville-brace-orders\n[\s\S]*?DeletionProtectionEnabled: true/);
   assert.match(template, /PointInTimeRecoveryEnabled: true/);
-  assert.equal(template.match(/SSEType: KMS/g)?.length, 2);
+  assert.equal(template.match(/SSEType: KMS/g)?.length, 3, "orders, rate limits and the access log");
   assert.match(template, /EnableKeyRotation: true/);
   assert.match(template, /TableName: medville-brace-order-limits[\s\S]*?AttributeName: expiresAt\n\s*Enabled: true/);
   assert.match(template, /ThrottlingBurstLimit: 20/);
   assert.match(template, /KmsKeyArn: !GetAtt OrdersKey.Arn/);
-  assert.doesNotMatch(template, /dynamodb:(Scan|Query|DeleteItem)/, "the intake role cannot read orders back in bulk or delete them");
+  const intakeRole = template.slice(template.indexOf("\n  OrdersRole:"), template.indexOf("\n  AdminRole:"));
+  assert.ok(intakeRole.includes("medville-brace-orders-intake"));
+  assert.doesNotMatch(intakeRole, /dynamodb:(Scan|Query|DeleteItem)/, "the intake role cannot read orders back in bulk or delete them");
+  assert.doesNotMatch(template, /dynamodb:(Scan|DeleteItem|BatchWriteItem)/, "nothing in the stack can scan or delete orders");
 
   for (const file of ["index.mjs", "order.mjs", "store.mjs", "notification.mjs"]) {
     const src = readFileSync(new URL(`./src/${file}`, import.meta.url), "utf8");
