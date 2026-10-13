@@ -1,0 +1,12 @@
+{
+  // Cloudflare Workers static assets: serves dist/ with no Worker code and no functions.
+  // The name must match the Worker in the Cloudflare dashboard.
+  "name": "medvillebrace",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "observability": { "enabled": false }
+}

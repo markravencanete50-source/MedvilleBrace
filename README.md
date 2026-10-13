@@ -8,7 +8,7 @@ Built with Vite, React 18, TypeScript, Tailwind CSS 4 and React Router. Static o
 
 | Service | Job | Sees customer data? |
 |---|---|---|
-| Cloudflare Pages or Vercel | Serves the website (`dist/`) with the headers in `public/_headers` (Cloudflare) or `vercel.json` (Vercel) | No |
+| Cloudflare (Workers static assets) or Vercel | Serves the website (`dist/`) with the headers in `public/_headers` (Cloudflare) or `vercel.json` (Vercel) | No |
 | Cloudinary | Serves product and lifestyle photographs | No |
 | Firebase (Spark plan, no Cloud Functions) | Staff sign-in, store content and daily order counts for the dashboard | No: counts only, never names, emails, addresses, notes or order ids |
 | AWS (API Gateway + Lambda + DynamoDB, in `aws/`) | Receives and stores order requests; serves the order dashboard's data and the figures sync | Yes: deploy only in the AWS account with the BAA in effect |
@@ -145,7 +145,7 @@ Set up in this order. Each step uses the output of the step before it.
 
 4. **Website on Vercel.** In Vercel, import the GitHub repository as a new project. Set the build command to `npm run build` and the output directory to `dist`. The headers, clean URLs and 404 handling come from `vercel.json`. Under Project Settings, Environment Variables, set `VITE_ORDER_ENDPOINT` (the `OrderEndpoint` output) and the four `VITE_FIREBASE_*` values from step 1. Set `VITE_ADMIN_ENDPOINT` only if the dashboard API is not at the same address. Then deploy. The build reads store content from Firebase, so set `VITE_FIREBASE_PROJECT_ID` before the first build. Without it, the build uses the defaults in `src/data/content-defaults.json`. The same names are in `.env.example`.
 
-   **Website on Cloudflare Pages (instead of Vercel).** In the Cloudflare dashboard, open Workers & Pages, choose Create, then Pages, then Import an existing Git repository, and pick this repository. Set the build command to `npm run build` and the build output directory to `dist`. Add the environment variables `NODE_VERSION=22`, `VITE_ORDER_ENDPOINT` and the `VITE_FIREBASE_*` values, as for Vercel. The headers come from `public/_headers`, which must stay in step with `vercel.json`. Clean URLs and the 404 page work without further setup. To publish from your own machine instead, run `npx wrangler login`, then `npm run build && npm run deploy:site`. Cloudflare Pages must serve static files only: add no Pages Functions and no Web Analytics, so no customer data ever reaches it.
+   **Website on Cloudflare (instead of Vercel).** In the Cloudflare dashboard, open Workers & Pages, choose Create, then import this GitHub repository. Set the build command to `npm run build` and the deploy command to `npx wrangler deploy`. `wrangler.jsonc` points Cloudflare at `dist/`, and its `name` must match the project name in the dashboard. Add the build variables `VITE_ORDER_ENDPOINT` and the `VITE_FIREBASE_*` values, as for Vercel. The headers come from `public/_headers`, which must stay in step with `vercel.json`. Clean URLs and the 404 page work without further setup. To publish from your own machine, run `npx wrangler login`, then `npm run build && npm run deploy:site`. Keep the Worker assets-only: no Worker code, no functions and no Web Analytics, so no customer data ever reaches Cloudflare.
 
 5. **First owner.** Create the first owner of the dashboard:
 
