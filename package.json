@@ -13,6 +13,7 @@
     "images:fetch": "node scripts/fetch-images.mjs",
     "images:optimize": "node scripts/optimize-images.mjs",
     "audit": "node scripts/audit-catalog.mjs",
+    "check:live": "node scripts/check-live.mjs",
     "images:upload": "node scripts/upload-cloudinary.mjs",
     "test:orders": "node --test aws/order.test.mjs aws/admin.test.mjs aws/figures.test.mjs",
     "build:orders": "node scripts/build-aws.mjs",
