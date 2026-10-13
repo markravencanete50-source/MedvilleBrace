@@ -25,13 +25,13 @@ Read README.md first. These are the rules that keep the site honest and on brand
 
 ## Hosting
 
-- Vercel (Hobby plan) serves the site from `dist/`, Cloudinary the photos, Firebase staff sign-in, store content and daily counts, and AWS (API Gateway, Lambda and DynamoDB in `aws/`) the orders, the access log and the dashboard API. Only AWS may ever receive customer data, and only in the account with the BAA in effect. Vercel never receives customer data: never route the order API through it, never add Vercel functions, Vercel Analytics or any other Vercel feature that reads form input.
+- Cloudflare Pages or Vercel serves the site from `dist/`, Cloudinary the photos, Firebase staff sign-in, store content and daily counts, and AWS (API Gateway, Lambda and DynamoDB in `aws/`) the orders, the access log and the dashboard API. Only AWS may ever receive customer data, and only in the account with the BAA in effect. The web host never receives customer data: never route the order API through it, never add Vercel or Cloudflare functions, Vercel Analytics, Cloudflare Web Analytics or any other host feature that reads form input.
 - Firebase holds no customer data. Never put customer data in Firestore or in any Firebase call. The store content documents and daily figures hold counts and copy only.
 - The public bundle must never import `firebase`. `vite.config.ts` `manualChunks` keeps it in admin-only chunks, so shoppers never download it.
 - Never log request bodies in `aws/src/`, never echo submitted values in errors, never put customer details in the notification email (tests in `aws/order.test.mjs` guard this).
 - Prices for an order come from `aws/catalog.json` (written by `build-catalog.mjs`), never from the browser. Redeploy the order stack after a catalog update.
 - The order stack starts closed (`OrdersEnabled=false`). Never delete or replace the orders table, the access-log table or the KMS key; all are retained by design.
-- Headers and the CSP live in `vercel.json`. A new external origin (image host, API) must be added to the CSP there, or browsers will block it.
+- Headers and the CSP live in `vercel.json` and `public/_headers` (Cloudflare Pages). Keep the two in step. A new external origin (image host, API) must be added to the CSP in both, or browsers will block it.
 - Image URLs go through `src/lib/cdn.ts`; do not hard-code `/products/...` or Cloudinary URLs in components.
 
 ## Order dashboard (`src/admin/`, `aws/src/admin.mjs`)
