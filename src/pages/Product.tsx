@@ -13,6 +13,7 @@ import { PRODUCT_STATUS_LABEL, type ProductStatus } from "../data/content";
 import { COMPANY } from "../data/site";
 import { useStore } from "../lib/store";
 import { usePageMeta } from "../lib/usePageMeta";
+import { useVariantPicker } from "../lib/useVariantPicker";
 
 const CLOSED_NOTE: Record<ProductStatus, string> = {
   sold_out: "This product is sold out and cannot be requested right now.",
@@ -25,7 +26,6 @@ export default function ProductPage() {
   const product = productBySlug(slug);
   const [detail, setDetail] = useState<ProductDetail | null>(null);
   const [failed, setFailed] = useState(false);
-  const [picked, setPicked] = useState<string[]>([]);
   const [qty, setQty] = useState(1);
   const [photo, setPhoto] = useState(1);
   const [added, setAdded] = useState(false);
@@ -50,19 +50,13 @@ export default function ProductPage() {
       if (!live) return;
       if (!d) return setFailed(true);
       setDetail(d);
-      const first = d.variants.find((v) => v.a) ?? d.variants[0];
-      setPicked(first ? [...first.o] : []);
     });
     return () => {
       live = false;
     };
   }, [product, pushRecent]);
 
-  const variant = useMemo(() => {
-    if (!detail) return undefined;
-    if (!detail.optionNames.length) return detail.variants[0];
-    return detail.variants.find((v) => v.o.every((x, i) => x === picked[i]));
-  }, [detail, picked]);
+  const { picked, variant, valuesFor, choose } = useVariantPicker(detail);
 
   const relatedList = useMemo(() => (product ? related(product) : []), [product]);
 
@@ -70,33 +64,6 @@ export default function ProductPage() {
 
   const region = regionBySlug(product.region);
   const comparing = compare.includes(product.slug);
-
-  /* An option value is offered when some variant has it alongside the values already picked for earlier options. */
-  const valuesFor = (i: number) => {
-    if (!detail) return [];
-    const seen = new Map<string, boolean>();
-    for (const v of detail.variants) {
-      const fits = v.o.slice(0, i).every((x, j) => x === picked[j]);
-      if (!fits) continue;
-      seen.set(v.o[i], (seen.get(v.o[i]) ?? false) || v.a);
-    }
-    return [...seen.entries()];
-  };
-
-  const choose = (i: number, value: string) => {
-    if (!detail) return;
-    const next = [...picked];
-    next[i] = value;
-    /* Keep later choices when they still exist with this value; otherwise take the first that does. */
-    for (let j = i + 1; j < detail.optionNames.length; j++) {
-      const ok = detail.variants.some((v) => v.o.slice(0, j).every((x, k) => x === next[k]) && v.o[j] === next[j]);
-      if (!ok) {
-        const v = detail.variants.find((x) => x.o.slice(0, j).every((y, k) => y === next[k]));
-        next[j] = v?.o[j] ?? next[j];
-      }
-    }
-    setPicked(next);
-  };
 
   const add = () => {
     if (!detail || !variant || product.status) return;
