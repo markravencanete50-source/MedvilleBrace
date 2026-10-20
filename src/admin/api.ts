@@ -25,6 +25,14 @@ export const ADMIN_ENDPOINT: string = import.meta.env?.VITE_ADMIN_ENDPOINT || (O
 
 export const isAdminApiConfigured = () => Boolean(ADMIN_ENDPOINT);
 
+/*
+  Visitor carts live only in each visitor's own browser until the owner turns
+  cart saving on (it changes the privacy policy and puts shopping data in AWS).
+  Until VITE_CART_SERVICE is "true" the Carts screen makes no request at all.
+*/
+export const CART_SERVICE: boolean = import.meta.env?.VITE_CART_SERVICE === "true";
+export const isCartsConfigured = () => isAdminApiConfigured() && CART_SERVICE;
+
 export type OrderStatus = "new" | "contacted" | "confirmed" | "shipped" | "completed" | "cancelled";
 
 export const ORDER_STATUSES: OrderStatus[] = ["new", "contacted", "confirmed", "shipped", "completed", "cancelled"];
@@ -76,6 +84,22 @@ export interface Order {
   items: OrderLine[];
   subtotal: number;
   currency: string;
+}
+
+/* A cart is "abandoned" when it has sat unchanged for an hour without becoming an order request. */
+export type CartState = "active" | "abandoned" | "converted";
+
+export const CART_STATE_LABEL: Record<CartState, string> = { active: "Active", abandoned: "Abandoned", converted: "Ordered" };
+export const CART_STATE_TONE: Record<CartState, "new" | "ok" | "warn" | "danger" | "quiet"> = { active: "new", abandoned: "warn", converted: "ok" };
+
+/* Holds no name, email or address: only a random id the visitor's browser made, what is in the cart and when. */
+export interface Cart {
+  id: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+  state: CartState;
+  items: OrderLine[];
+  subtotal: number;
 }
 
 export interface DayFigures {
@@ -166,6 +190,8 @@ export const adminApi = {
   getOrder: (getToken: GetToken, id: string) => call<{ order: Order }>(getToken, "orders.get", { id }),
   updateOrder: (getToken: GetToken, id: string, patch: { status?: OrderStatus; note?: string }) =>
     call<{ ok: true; updatedAt: string; updatedBy: string }>(getToken, "orders.update", { id, ...patch }),
+  listCarts: (getToken: GetToken, cursor?: string) => call<{ carts: Cart[]; nextCursor: string | null }>(getToken, "carts.list", cursor ? { cursor } : {}),
+  removeCart: (getToken: GetToken, id: string) => call<{ ok: true }>(getToken, "carts.remove", { id }),
   publish: (getToken: GetToken) => call<{ ok: true; already?: boolean }>(getToken, "site.publish"),
   recordExport: (getToken: GetToken, ids: string[]) => call<{ ok: true }>(getToken, "orders.export", { ids }),
   listAudit: (getToken: GetToken, cursor?: string) => call<{ entries: AuditEntry[]; nextCursor: string | null }>(getToken, "audit.list", cursor ? { cursor } : {}),

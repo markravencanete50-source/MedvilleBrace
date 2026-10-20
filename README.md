@@ -56,6 +56,7 @@ The screens are grouped in the menu.
 - **Overview**: totals for any date range (requests, value quoted, average request, items, requests waiting on the team, busiest day), a line of requests or value per day, time of day, day of the week, status, most requested products, brands, categories and ship-to states. Clicking a day on the line opens it in the calendar. The figures come from Firebase. Days from before the stack was set up need `npm run figures:rebuild` (see Deploy, step 6).
 - **Calendar**: one month at a time, each day showing its number of requests and value, shaded by how busy it was. Picking a day shows that day's figures (requests, value, items, cancelled, hour by hour, status, products) and its orders.
 - **Orders**: every request, newest first, filtered by date range and status and searched in the browser. An order opens in a side panel: customer, ship-to address, items with options, SKUs and prices, the customer's note, a status (new, contacted, confirmed, shipped, completed, cancelled) and an internal note. Export to CSV asks first and is logged.
+- **Carts**: carts started on the website, newest first, with their state (active, abandoned after an hour unchanged, or ordered), the items and the estimated subtotal. A cart holds no name, email or address, so it cannot say who the visitor was. Removing a cart is logged. The screen is built but not connected: see Carts below.
 
 **Store**
 
@@ -84,6 +85,20 @@ How it is protected:
 - No order id ever appears in a URL: everything is a POST, and an order opens in a panel, not at its own address.
 
 Two-step sign-in is not switched on yet. It is the next thing to add if the team wants it.
+
+## Carts
+
+Visitor carts live only in each visitor's own browser. That is what the privacy policy says, and it stays true until the owner decides otherwise.
+
+The dashboard has a Carts screen (`src/admin/pages/Carts.tsx`) and an API client for it (`adminApi.listCarts` and `adminApi.removeCart` in `src/admin/api.ts`, actions `carts.list` and `carts.remove`). It is switched off: with `VITE_CART_SERVICE` unset the screen makes no request and says so.
+
+Not built yet, on purpose:
+
+- The server side: a cart intake function, a cart table and the two dashboard actions in `aws/src/admin.mjs`.
+- The website sending carts anywhere.
+- The privacy policy wording that would have to change.
+
+Turning this on stores shopping data in AWS, and brace purchases can be health related. It is the owner's decision, and the pieces above must be added together, with the policy updated in the same change.
 
 ## Catalog pipeline
 

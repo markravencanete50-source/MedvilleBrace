@@ -23,12 +23,12 @@ const IDLE_LIMIT_MS = 20 * 60 * 1000;
 const IDLE_WARNING_MS = 2 * 60 * 1000;
 
 export type AdminRole = "owner" | "staff";
-export type AdminSection = "overview" | "calendar" | "orders" | "products" | "faqs" | "settings" | "team" | "audit";
+export type AdminSection = "overview" | "calendar" | "orders" | "carts" | "products" | "faqs" | "settings" | "team" | "audit";
 
 /* What each role can open. The server and the Firestore rules enforce the same split; this only decides what is worth showing. */
 export const ROLE_ACCESS: Record<AdminRole, AdminSection[]> = {
-  owner: ["overview", "calendar", "orders", "products", "faqs", "settings", "team", "audit"],
-  staff: ["overview", "calendar", "orders", "products", "faqs"],
+  owner: ["overview", "calendar", "orders", "carts", "products", "faqs", "settings", "team", "audit"],
+  staff: ["overview", "calendar", "orders", "carts", "products", "faqs"],
 };
 
 export const canOpen = (role: AdminRole, section: string) => (ROLE_ACCESS[role] as string[]).includes(section);

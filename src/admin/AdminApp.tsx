@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { BarChart3, CalendarDays, CircleHelp, ClipboardList, ExternalLink, LogOut, Menu, Moon, MoreHorizontal, Package, ScrollText, Store, Sun, Users, X } from "lucide-react";
+import { BarChart3, CalendarDays, CircleHelp, ClipboardList, ExternalLink, ShoppingCart, LogOut, Menu, Moon, MoreHorizontal, Package, ScrollText, Store, Sun, Users, X } from "lucide-react";
 import "./admin.css";
 import { AdminAuthProvider, canOpen, useAdminAuth, type AdminRole, type AdminSection } from "./auth";
 import { isAdminApiConfigured } from "./api";
@@ -50,6 +50,7 @@ const LOADERS = {
   overview: () => import("./pages/Overview"),
   calendar: () => import("./pages/Calendar"),
   orders: () => import("./pages/Orders"),
+  carts: () => import("./pages/Carts"),
   products: () => import("./pages/Products"),
   faqs: () => import("./pages/Faqs"),
   settings: () => import("./pages/Settings"),
@@ -59,6 +60,7 @@ const LOADERS = {
 const Overview = screen(LOADERS.overview);
 const Calendar = screen(LOADERS.calendar);
 const Orders = screen(LOADERS.orders);
+const Carts = screen(LOADERS.carts);
 const Products = screen(LOADERS.products);
 const Faqs = screen(LOADERS.faqs);
 const Settings = screen(LOADERS.settings);
@@ -71,6 +73,7 @@ const NAV: { id: AdminSection; label: string; icon: typeof BarChart3; group: str
   { id: "overview", label: "Overview", icon: BarChart3, group: "Orders" },
   { id: "calendar", label: "Calendar", icon: CalendarDays, group: "Orders" },
   { id: "orders", label: "Orders", icon: ClipboardList, group: "Orders" },
+  { id: "carts", label: "Carts", icon: ShoppingCart, group: "Orders" },
   { id: "products", label: "Products", icon: Package, group: "Store" },
   { id: "faqs", label: "Questions", icon: CircleHelp, group: "Store" },
   { id: "settings", label: "Store details", icon: Store, group: "Store" },
@@ -365,6 +368,7 @@ function Shell() {
             {section === "overview" && <Overview openDay={openDay} />}
             {section === "calendar" && <Calendar initialDay={calendarDay} />}
             {section === "orders" && <Orders />}
+            {section === "carts" && <Carts />}
             {section === "products" && <Products />}
             {section === "faqs" && <Faqs />}
             {section === "settings" && <Settings />}
