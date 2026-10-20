@@ -81,6 +81,9 @@ const NAV: { id: AdminSection; label: string; icon: typeof BarChart3; group: str
   { id: "audit", label: "Access log", icon: ScrollText, group: "Account" },
 ];
 
+/* Screens that read from the order service. Products, Questions and Store details work without it (they use Firebase). */
+const NEEDS_ORDER_SERVICE: AdminSection[] = ["calendar", "orders", "team", "audit"];
+
 const ROLE_LABEL: Record<AdminRole, string> = { owner: "Owner", staff: "Staff" };
 
 /* The section lives in the hash, so no dashboard screen ever has a shareable path and no order can end up in a link. */
@@ -349,7 +352,7 @@ function Shell() {
         </aside>
 
         <main className="admin-main">
-          {!isAdminApiConfigured() && (
+          {!isAdminApiConfigured() && NEEDS_ORDER_SERVICE.includes(section) && (
             <div className="mb-4">
               <Banner tone="warn">The order service is not connected to this build yet. Set VITE_ORDER_ENDPOINT (or VITE_ADMIN_ENDPOINT) and rebuild. See README.md, Order dashboard.</Banner>
             </div>

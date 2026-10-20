@@ -29,6 +29,8 @@ export default function PublishBar({ savedAt }: { savedAt: Date | null }) {
   const pulled = CONTENT.source === "firebase" ? Date.parse(CONTENT.pulledAt) : 0;
   const pending = Boolean(savedAt && (!Number.isFinite(pulled) || savedAt.getTime() > pulled));
 
+  const connected = isAdminApiConfigured();
+
   const state = asked
     ? "Publishing. The website is rebuilding and the changes will be live in about two minutes."
     : !savedAt
@@ -59,9 +61,14 @@ export default function PublishBar({ savedAt }: { savedAt: Date | null }) {
             {state}
           </p>
         </div>
-        <button type="button" className="admin-btn admin-btn-primary w-full sm:w-auto" disabled={busy || !isAdminApiConfigured()} onClick={() => void publish()}>
+        <button type="button" className="admin-btn admin-btn-primary w-full sm:w-auto" disabled={busy || !connected} onClick={() => void publish()}>
           <Rocket size={16} aria-hidden="true" /> {busy ? "Publishing" : "Publish"}
         </button>
+        {!connected && (
+          <p className="admin-help m-0 w-full">
+            The Publish button needs the order service, which is not connected yet. Your changes are still saved. To put them on the website now, redeploy the site in Vercel (Deployments, then Redeploy). The build copies the saved changes.
+          </p>
+        )}
       </div>
     </Card>
   );
