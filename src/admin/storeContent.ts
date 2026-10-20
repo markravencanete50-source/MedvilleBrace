@@ -17,7 +17,7 @@
 */
 import { deleteField, doc, FieldPath, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore/lite";
 import defaults from "../data/content-defaults.json";
-import type { Faq, ProductChange, StoreSettings } from "../data/content";
+import { isProductStatus, type Faq, type ProductChange, type StoreSettings } from "../data/content";
 import { getFirestoreLite } from "./firebase";
 
 export const LIMITS = {
@@ -124,9 +124,10 @@ export function readChanges(data: Record<string, unknown>): Record<string, Produ
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
   for (const [slug, value] of Object.entries(raw)) {
     if (!value || typeof value !== "object") continue;
-    const v = value as { hidden?: unknown; variants?: unknown };
+    const v = value as { hidden?: unknown; status?: unknown; variants?: unknown };
     const entry: ProductChange = {};
     if (v.hidden === true) entry.hidden = true;
+    if (isProductStatus(v.status)) entry.status = v.status;
     if (v.variants && typeof v.variants === "object") {
       const variants: NonNullable<ProductChange["variants"]> = {};
       for (const [key, c] of Object.entries(v.variants as Record<string, { p?: unknown; a?: unknown }>)) {
@@ -137,7 +138,7 @@ export function readChanges(data: Record<string, unknown>): Record<string, Produ
       }
       if (Object.keys(variants).length) entry.variants = variants;
     }
-    if (entry.hidden || entry.variants) out[slug] = entry;
+    if (entry.hidden || entry.status || entry.variants) out[slug] = entry;
   }
   return out;
 }

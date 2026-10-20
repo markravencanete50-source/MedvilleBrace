@@ -2,15 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { useAdminAuth } from "../auth";
 import { ALL_PRODUCTS, categoryName, money, type Product, type ProductDetail } from "../../data/catalog";
-import { variantKey, type ProductChange } from "../../data/content";
+import { isProductStatus, PRODUCT_STATUSES, PRODUCT_STATUS_LABEL, variantKey, type ProductChange, type ProductStatus } from "../../data/content";
 import { isFirebaseConfigured } from "../../lib/firebaseConfig";
 import PublishBar from "../PublishBar";
 import { LIMITS, readChanges, readStoreDoc, StoreError, writeProductChange, type StoreDoc } from "../storeContent";
 import { Badge, Banner, Card, Drawer, Empty, Field, PageHeader, Spinner, Switch, useToast } from "../ui";
 
 /*
-  Products: hide a product, change a variant's price, or mark a variant out of
-  stock, without touching the supplier's feed.
+  Products: hide a product, set its availability (sold out, pending or coming
+  soon), change a variant's price, or mark a variant out of stock, without
+  touching the supplier's feed.
 
   Search runs over the whole catalog (ALL_PRODUCTS), including products that
   are already hidden, so a hidden product can always be brought back. Opening
@@ -37,6 +38,7 @@ function describe(change: ProductChange) {
   const stock = variants.filter((v) => v.a === false).length;
   const parts: string[] = [];
   if (change.hidden) parts.push("Hidden");
+  if (change.status) parts.push(PRODUCT_STATUS_LABEL[change.status]);
   if (prices) parts.push(`${prices} ${prices === 1 ? "price" : "prices"} changed`);
   if (stock) parts.push(`${stock} out of stock`);
   return parts;
@@ -79,7 +81,7 @@ export default function Products() {
     [changes],
   );
 
-  const header = <PageHeader title="Products" lede="Hide a product, change a price or mark a size out of stock. Changes reach the website when you publish." />;
+  const header = <PageHeader title="Products" lede="Hide a product, mark it sold out, pending or coming soon, change a price or mark a size out of stock. Changes reach the website when you publish." />;
   if (!connected) {
     return (
       <>
@@ -99,7 +101,7 @@ export default function Products() {
           <span className="admin-row-sub">{product ? `${product.brand}, ${categoryName(product.category)}` : "No longer in the catalog"}</span>
         </span>
         <span className="flex flex-wrap gap-1.5">
-          {change ? describe(change).map((text) => <Badge key={text} tone={text === "Hidden" ? "danger" : "warn"}>{text}</Badge>) : null}
+          {change ? describe(change).map((text) => <Badge key={text} tone={text === "Hidden" || text === PRODUCT_STATUS_LABEL.sold_out ? "danger" : text === PRODUCT_STATUS_LABEL.coming_soon ? "new" : "warn"}>{text}</Badge>) : null}
         </span>
       </button>
     </li>
@@ -205,6 +207,7 @@ function Editor({
   const [detail, setDetail] = useState<ProductDetail | null>(null);
   const [problem, setProblem] = useState("");
   const [hidden, setHidden] = useState(Boolean(entry?.hidden));
+  const [status, setStatus] = useState<ProductStatus | "">(entry?.status ?? "");
   const [rows, setRows] = useState<Row[] | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -225,6 +228,7 @@ function Editor({
   useEffect(() => {
     if (!detail || !docReady) return;
     setHidden(Boolean(entry?.hidden));
+    setStatus(entry?.status ?? "");
     setRows(
       detail.variants.map((v) => {
         const key = variantKey(v);
@@ -239,6 +243,7 @@ function Editor({
     const out: ProductChange = {};
     let invalid = false;
     if (hidden) out.hidden = true;
+    if (status) out.status = status;
     if (detail && rows) {
       const variants: NonNullable<ProductChange["variants"]> = {};
       detail.variants.forEach((v, i) => {
@@ -256,8 +261,8 @@ function Editor({
       /* The variants could not be loaded: keep what is saved. */
       out.variants = entry.variants;
     }
-    return { entry: out.hidden || out.variants ? out : null, invalid };
-  }, [hidden, rows, detail, entry]);
+    return { entry: out.hidden || out.status || out.variants ? out : null, invalid };
+  }, [hidden, status, rows, detail, entry]);
 
   const saved = JSON.stringify(entry ?? null);
   const dirty = JSON.stringify(built.entry) !== saved;
@@ -279,6 +284,7 @@ function Editor({
 
   const clearAll = () => {
     setHidden(false);
+    setStatus("");
     setRows((current) => (current && detail ? current.map((r, i) => ({ ...r, price: String(detail.variants[i].p), inStock: detail.variants[i].a !== false })) : current));
   };
 
@@ -322,6 +328,19 @@ function Editor({
         <>
           <div className="mb-5">
             <Switch checked={hidden} onChange={setHidden} label="Hide this product" help="A hidden product is removed from the website at the next publish. Orders already placed are not affected." />
+          </div>
+
+          <div className="mb-5">
+            <Field label="Availability" htmlFor="product-status" help="Sold out, pending and coming soon products stay on the website with a label, but cannot be added to the cart or ordered. Clear it to open the product again.">
+              <select id="product-status" className="admin-select" value={status} onChange={(event) => setStatus(isProductStatus(event.target.value) ? event.target.value : "")}>
+                <option value="">Available to order</option>
+                {PRODUCT_STATUSES.map((value) => (
+                  <option key={value} value={value}>
+                    {PRODUCT_STATUS_LABEL[value]}
+                  </option>
+                ))}
+              </select>
+            </Field>
           </div>
 
           {detail && rows && (

@@ -412,6 +412,22 @@ test("hasUnavailable: only a product or variant that was there and is not now", 
   for (const junk of [null, undefined, {}, { items: "x" }, { items: [null, 5, "x", { slug: 7 }, { slug: "test-knee-brace" }] }]) assert.equal(hasUnavailable(junk, live, CATALOG), false);
 });
 
+test("store changes: a sold out, pending or coming soon product cannot be ordered, and junk statuses are ignored", () => {
+  const built = deepFreeze(structuredClone(CATALOG));
+  for (const status of ["sold_out", "pending", "coming_soon"]) {
+    const live = applyStoreChanges(built, { "test-sleeve": { status } });
+    assert.equal(Object.hasOwn(live, "test-sleeve"), false, `${status} closes the product to orders`);
+    assert.equal(Object.hasOwn(live, "test-knee-brace"), true, "other products are untouched");
+    const line = { slug: "test-sleeve", sku: "", options: [], qty: 1 };
+    assert.equal(hasUnavailable({ items: [line] }, live, CATALOG), true, `${status}: a cart line added earlier is refused`);
+  }
+  for (const junk of ["", "SOLD_OUT", "hidden", 7, null, {}, ["sold_out"]]) {
+    const live = applyStoreChanges(built, { "test-sleeve": { status: junk } });
+    assert.equal(Object.hasOwn(live, "test-sleeve"), true, `${JSON.stringify(junk)} is not a status`);
+  }
+  assert.deepEqual(built, CATALOG, "the built catalog is not changed");
+});
+
 test("handler: 409 for a product hidden or a variant out of stock since it was added to the cart, 400 for junk", async () => {
   let saved = 0;
   const save = async () => (saved++, { duplicate: false });

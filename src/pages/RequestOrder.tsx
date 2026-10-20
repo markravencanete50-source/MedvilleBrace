@@ -4,7 +4,7 @@ import { AlertCircle, CheckCircle2, Copy, Mail } from "lucide-react";
 import Container from "../components/Container";
 import PageHero from "../components/PageHero";
 import Button from "../components/Button";
-import { money, productBySlug } from "../data/catalog";
+import { isClosed, money, productBySlug } from "../data/catalog";
 import { COMPANY, ORDER_ENDPOINT } from "../data/site";
 import { useStore } from "../lib/store";
 import { usePageMeta } from "../lib/usePageMeta";
@@ -315,7 +315,12 @@ export default function RequestOrder() {
                 <span className="text-small text-ink-muted">Estimated subtotal</span>
                 <span className="font-display font-bold">{money(cartTotal)}</span>
               </div>
-              <Button type="submit" className="mt-5 w-full" disabled={state === "sending"}>
+              {cart.some((l) => isClosed(l.slug)) && (
+                <p role="status" className="mt-4 rounded-md bg-brand-tint p-3 text-caption">
+                  Some items in your cart cannot be requested right now. <Link to="/cart" className="underline">Open the cart</Link> to remove them.
+                </p>
+              )}
+              <Button type="submit" className="mt-5 w-full" disabled={state === "sending" || cart.some((l) => isClosed(l.slug))}>
                 {state === "sending" ? "Sending..." : ORDER_ENDPOINT ? "Send order request" : "Write the request email"}
               </Button>
               {!ORDER_ENDPOINT && <p className="mt-3 text-caption text-ink-subtle">Your email app will open with the request filled in, ready to send to {COMPANY.email}.</p>}

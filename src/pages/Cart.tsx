@@ -5,7 +5,8 @@ import PageHero from "../components/PageHero";
 import Button from "../components/Button";
 import ProductImage from "../components/ProductImage";
 import { LineOptions, QtyStepper } from "../components/CartDrawer";
-import { money, productBySlug } from "../data/catalog";
+import { isClosed, money, productBySlug } from "../data/catalog";
+import { PRODUCT_STATUS_LABEL } from "../data/content";
 import { COMPANY } from "../data/site";
 import { useStore } from "../lib/store";
 import { usePageMeta } from "../lib/usePageMeta";
@@ -47,6 +48,7 @@ export default function Cart() {
                         {p.title}
                       </Link>
                       <LineOptions line={line} />
+                      {p.status && <p className="mt-1 text-caption font-semibold">{PRODUCT_STATUS_LABEL[p.status]}: remove this item to send your request.</p>}
                       {line.sku && <p className="text-caption text-ink-subtle">SKU {line.sku}</p>}
                       <div className="mt-3 flex flex-wrap items-center gap-4">
                         <QtyStepper line={line} />
@@ -78,9 +80,18 @@ export default function Cart() {
               </dl>
               {toFree > 0 && <p className="mt-3 rounded-md bg-brand-tint p-3 text-caption">Add {money(toFree)} more for free standard shipping.</p>}
               <p className="mt-4 text-caption text-ink-subtle">Sending a request does not charge you. We confirm sizes, stock, shipping and the final total by email first.</p>
-              <Button to="/request-order" className="mt-5 w-full">
-                Send order request
-              </Button>
+              {cart.some((l) => isClosed(l.slug)) ? (
+                <>
+                  <p role="status" className="mt-4 rounded-md bg-brand-tint p-3 text-caption">Some items cannot be requested right now. Remove them to continue.</p>
+                  <Button className="mt-3 w-full" disabled>
+                    Send order request
+                  </Button>
+                </>
+              ) : (
+                <Button to="/request-order" className="mt-5 w-full">
+                  Send order request
+                </Button>
+              )}
               <Link to="/policies/how-ordering-works" className="mt-3 block text-center text-caption text-brand underline">
                 How ordering works
               </Link>

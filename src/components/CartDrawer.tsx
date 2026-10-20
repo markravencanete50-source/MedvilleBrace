@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import { Minus, Plus, Trash2, X } from "lucide-react";
 import Button from "./Button";
 import ProductImage from "./ProductImage";
-import { money, productBySlug } from "../data/catalog";
+import { isClosed, money, productBySlug } from "../data/catalog";
+import { PRODUCT_STATUS_LABEL } from "../data/content";
 import { COMPANY } from "../data/site";
 import { useStore, type CartLine } from "../lib/store";
 
@@ -92,6 +93,7 @@ export default function CartDrawer() {
                         {p.title}
                       </Link>
                       <LineOptions line={line} />
+                      {p.status && <p className="mt-1 text-caption font-semibold">{PRODUCT_STATUS_LABEL[p.status]}: remove to continue.</p>}
                       <div className="mt-2 flex items-center justify-between gap-2">
                         <QtyStepper line={line} />
                         <span className="font-display text-small font-bold">{money(line.price * line.qty)}</span>
@@ -111,9 +113,13 @@ export default function CartDrawer() {
               </div>
               <p className="mt-1 text-caption text-ink-subtle">We confirm sizes, stock and the final total before you pay.</p>
               <div className="mt-4 grid gap-2">
-                <Button to="/request-order" onClick={() => setCartOpen(false)}>
-                  Send order request
-                </Button>
+                {cart.some((l) => isClosed(l.slug)) ? (
+                  <Button disabled>Send order request</Button>
+                ) : (
+                  <Button to="/request-order" onClick={() => setCartOpen(false)}>
+                    Send order request
+                  </Button>
+                )}
                 <Button to="/cart" variant="ghost" onClick={() => setCartOpen(false)}>
                   View full cart
                 </Button>

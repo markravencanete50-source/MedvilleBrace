@@ -98,7 +98,7 @@ for (const p of catalog.PRODUCTS) {
           "@type": p.priceMin === p.priceMax ? "Offer" : "AggregateOffer",
           priceCurrency: "USD",
           ...(p.priceMin === p.priceMax ? { price: p.priceMin.toFixed(2) } : { lowPrice: p.priceMin.toFixed(2), highPrice: p.priceMax.toFixed(2) }),
-          availability: p.available ? "https://schema.org/InStock" : "https://schema.org/LimitedAvailability",
+          availability: p.status ? "https://schema.org/OutOfStock" : p.available ? "https://schema.org/InStock" : "https://schema.org/LimitedAvailability",
           url: `${ORIGIN}/product/${p.slug}`,
         },
       },

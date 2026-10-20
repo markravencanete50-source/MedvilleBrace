@@ -9,9 +9,16 @@ import ProductCard from "../components/ProductCard";
 import NotFound from "./NotFound";
 import { categoryName, imageSrc, loadDetail, money, priceLabel, productBySlug, related, slugifyCondition, type ProductDetail } from "../data/catalog";
 import { regionBySlug } from "../data/taxonomy";
+import { PRODUCT_STATUS_LABEL, type ProductStatus } from "../data/content";
 import { COMPANY } from "../data/site";
 import { useStore } from "../lib/store";
 import { usePageMeta } from "../lib/usePageMeta";
+
+const CLOSED_NOTE: Record<ProductStatus, string> = {
+  sold_out: "This product is sold out and cannot be requested right now.",
+  pending: "This product is pending and cannot be requested yet.",
+  coming_soon: "This product is coming soon and cannot be requested yet.",
+};
 
 export default function ProductPage() {
   const { slug = "" } = useParams();
@@ -92,7 +99,7 @@ export default function ProductPage() {
   };
 
   const add = () => {
-    if (!detail || !variant) return;
+    if (!detail || !variant || product.status) return;
     addToCart({ slug: product.slug, sku: variant.s, options: variant.o, optionNames: detail.optionNames, price: variant.p }, qty);
     setAdded(true);
     window.setTimeout(() => setAdded(false), 2200);
@@ -142,10 +149,17 @@ export default function ProductPage() {
           <div className="mt-5 flex flex-wrap items-baseline gap-3">
             <p className="font-display text-h2 font-bold">{variant ? money(variant.p) : priceLabel(product)}</p>
             {product.renewed && <span className="rounded-full bg-ink px-3 py-1 text-caption font-semibold text-on-dark">Renewed</span>}
-            {variant && !variant.a && <span className="rounded-full bg-surface px-3 py-1 text-caption font-semibold">We will confirm stock</span>}
+            {product.status && <span className="rounded-full bg-ink px-3 py-1 text-caption font-semibold text-on-dark">{PRODUCT_STATUS_LABEL[product.status]}</span>}
+            {!product.status && variant && !variant.a && <span className="rounded-full bg-surface px-3 py-1 text-caption font-semibold">We will confirm stock</span>}
           </div>
 
           <p className="mt-4 max-w-prose text-ink-muted">{product.summary}</p>
+
+          {product.status && (
+            <p role="status" className="mt-4 rounded-lg bg-brand-tint p-4 text-small">
+              {CLOSED_NOTE[product.status]} Email <a className="underline" href={`mailto:${COMPANY.email}`}>{COMPANY.email}</a> with any questions.
+            </p>
+          )}
 
           <div className="mt-6 space-y-5">
             {!detail && !failed && <div className="h-24 animate-pulse rounded-lg bg-surface" aria-label="Loading options" />}
@@ -193,16 +207,16 @@ export default function ProductPage() {
             <label className="sr-only" htmlFor="qty">
               Quantity
             </label>
-            <select id="qty" value={qty} onChange={(e) => setQty(Number(e.target.value))} className="min-h-[48px] rounded-full border border-line-strong bg-surface-raised px-4 text-small">
+            <select id="qty" value={qty} disabled={Boolean(product.status)} onChange={(e) => setQty(Number(e.target.value))} className="min-h-[48px] disabled:opacity-55 rounded-full border border-line-strong bg-surface-raised px-4 text-small">
               {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n}>
                   Qty {n}
                 </option>
               ))}
             </select>
-            <Button onClick={add} disabled={!variant} className="min-w-[200px] flex-1 sm:flex-none">
+            <Button onClick={add} disabled={!variant || Boolean(product.status)} className="min-w-[200px] flex-1 sm:flex-none">
               {added ? <Check className="h-5 w-5" aria-hidden="true" /> : <ShoppingBag className="h-5 w-5" aria-hidden="true" />}
-              {added ? "Added to cart" : "Add to cart"}
+              {product.status ? PRODUCT_STATUS_LABEL[product.status] : added ? "Added to cart" : "Add to cart"}
             </Button>
             <Button variant="ghost" onClick={() => toggleCompare(product.slug)}>
               {comparing ? <Check className="h-4 w-4" aria-hidden="true" /> : <Plus className="h-4 w-4" aria-hidden="true" />}

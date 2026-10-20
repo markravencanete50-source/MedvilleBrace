@@ -8,6 +8,8 @@
   minute, and lays it over the built catalog (aws/catalog.json):
 
     products.<slug>.hidden            the product cannot be ordered
+    products.<slug>.status            "sold_out", "pending" or "coming_soon":
+                                      the product is shown but cannot be ordered
     products.<slug>.variants.<key>.p  the price for that variant
     products.<slug>.variants.<key>.a  false: that variant is out of stock
 
@@ -20,6 +22,9 @@
 */
 export const variantKey = (v) => v.s || v.o.join("|");
 
+/* The same three words as ProductStatus in src/data/content.ts and STATUSES in scripts/pull-content.mjs. */
+const STATUSES = new Set(["sold_out", "pending", "coming_soon"]);
+
 const price = (n) => typeof n === "number" && Number.isFinite(n) && n > 0 && n < 100000;
 
 /* The built catalog with the store changes applied. Never changes the catalog passed in. */
@@ -28,7 +33,7 @@ export function applyStoreChanges(catalog, products) {
   const out = { ...catalog };
   for (const [slug, change] of Object.entries(products)) {
     if (!Object.hasOwn(out, slug) || !change || typeof change !== "object") continue;
-    if (change.hidden === true) {
+    if (change.hidden === true || (typeof change.status === "string" && STATUSES.has(change.status))) {
       delete out[slug];
       continue;
     }

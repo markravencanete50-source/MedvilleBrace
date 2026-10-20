@@ -21,11 +21,26 @@ export type StoreSettings = {
 };
 export type Faq = { q: string; a: string };
 export type VariantChange = { p?: number; a?: false };
+/*
+  A product the shop shows but cannot take a request for. Unlike a size marked
+  out of stock (which the team still confirms by email), a status closes the
+  whole product to the cart and to order intake until the team clears it.
+*/
+export type ProductStatus = "sold_out" | "pending" | "coming_soon";
+export const PRODUCT_STATUSES: ProductStatus[] = ["sold_out", "pending", "coming_soon"];
+export const PRODUCT_STATUS_LABEL: Record<ProductStatus, string> = {
+  sold_out: "Sold out",
+  pending: "Pending",
+  coming_soon: "Coming soon",
+};
+export const isProductStatus = (v: unknown): v is ProductStatus => typeof v === "string" && (PRODUCT_STATUSES as string[]).includes(v);
+
 export type ProductChange = {
   hidden?: true;
+  status?: ProductStatus;
   variants?: Record<string, VariantChange>;
   /* Filled in by the build from the product's variants with the changes applied. */
-  index?: { priceMin: number; priceMax: number; available: boolean };
+  index?: { priceMin: number; priceMax: number; available: boolean; status?: ProductStatus };
 };
 
 export type StoreContent = {

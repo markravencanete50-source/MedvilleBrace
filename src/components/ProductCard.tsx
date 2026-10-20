@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Check, Plus } from "lucide-react";
 import ProductImage from "./ProductImage";
 import { categoryName, priceLabel, type Product } from "../data/catalog";
+import { PRODUCT_STATUS_LABEL } from "../data/content";
 import { useStore } from "../lib/store";
 
 export default function ProductCard({ product, eager = false }: { product: Product; eager?: boolean }) {
@@ -14,7 +15,11 @@ export default function ProductCard({ product, eager = false }: { product: Produ
       </Link>
       <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-1.5">
         {product.renewed && <span className="rounded-full bg-ink px-2.5 py-1 text-caption font-semibold text-on-dark">Renewed</span>}
-        {!product.available && <span className="rounded-full bg-surface px-2.5 py-1 text-caption font-semibold text-ink">Ask about stock</span>}
+        {product.status ? (
+          <span className="rounded-full bg-ink px-2.5 py-1 text-caption font-semibold text-on-dark">{PRODUCT_STATUS_LABEL[product.status]}</span>
+        ) : (
+          !product.available && <span className="rounded-full bg-surface px-2.5 py-1 text-caption font-semibold text-ink">Ask about stock</span>
+        )}
       </div>
       <div className="flex flex-1 flex-col gap-1.5 p-4">
         <p className="text-caption font-semibold uppercase tracking-[0.12em] text-brand">{product.brand}</p>

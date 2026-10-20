@@ -95,6 +95,7 @@ function cleanFaqs(doc) {
 }
 
 const variantKey = (v) => v.s || v.o.join("|");
+const STATUSES = new Set(["sold_out", "pending", "coming_soon"]);
 const round2 = (n) => Math.round(n * 100) / 100;
 
 async function cleanProducts(doc) {
@@ -107,6 +108,7 @@ async function cleanProducts(doc) {
       out[slug] = { hidden: true };
       continue;
     }
+    const status = typeof entry.status === "string" && STATUSES.has(entry.status) ? entry.status : null;
     const src = entry.variants && typeof entry.variants === "object" ? entry.variants : {};
     const file = `public/data/p/${slug}.json`;
     if (!existsSync(file)) continue;
@@ -121,15 +123,21 @@ async function cleanProducts(doc) {
       if (c.a === false) change.a = false;
       if (Object.keys(change).length) changes[key] = change;
     }
-    if (!Object.keys(changes).length) continue;
+    if (!Object.keys(changes).length && !status) continue;
     const applied = variants.map((v) => {
       const c = changes[variantKey(v)];
       return { p: c?.p ?? v.p, a: c?.a === false ? false : v.a !== false };
     });
     const prices = applied.map((v) => v.p);
     out[slug] = {
-      variants: changes,
-      index: { priceMin: Math.min(...prices), priceMax: Math.max(...prices), available: applied.some((v) => v.a) },
+      ...(status ? { status } : {}),
+      ...(Object.keys(changes).length ? { variants: changes } : {}),
+      index: {
+        priceMin: Math.min(...prices),
+        priceMax: Math.max(...prices),
+        available: !status && applied.some((v) => v.a),
+        ...(status ? { status } : {}),
+      },
     };
   }
   return out;

@@ -59,7 +59,7 @@ The screens are grouped in the menu.
 
 **Store**
 
-- **Products**: hide a product, or change a variant's price or mark it out of stock. Order intake applies these within a minute. The website shows them after its next rebuild.
+- **Products**: hide a product, set its availability to Sold out, Pending or Coming soon, change a variant's price, or mark a size out of stock. A product with an availability status stays on the website with a label but cannot be added to the cart or ordered, and order intake refuses it. A size marked out of stock is different: the request still goes through and the team confirms stock by email. Order intake applies these within a minute. The website shows them after its next rebuild.
 - **Questions**: edit the questions and answers on the FAQ page.
 - **Store details** (owners only): the contact email and phone, opening hours, the free shipping threshold, the return period and the notice shown on the site. The website shows these after its next rebuild.
 

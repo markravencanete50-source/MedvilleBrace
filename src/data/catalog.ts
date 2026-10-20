@@ -9,7 +9,7 @@
 import raw from "./catalog.json";
 import type { RegionSlug } from "./taxonomy";
 import { cdnUrl } from "../lib/cdn";
-import { productChange, variantKey } from "./content";
+import { productChange, variantKey, type ProductStatus } from "./content";
 
 export type Product = {
   slug: string;
@@ -22,6 +22,8 @@ export type Product = {
   priceMin: number;
   priceMax: number;
   available: boolean;
+  /* Set in the dashboard: the product is shown but cannot be requested. */
+  status?: ProductStatus;
   variantCount: number;
   conditions: string[];
   hcpcs: string[];
@@ -76,6 +78,9 @@ export const CATEGORY_NAMES: Record<string, string> = data.categories;
 
 const bySlug = new Map(PRODUCTS.map((p) => [p.slug, p]));
 export const productBySlug = (slug: string) => bySlug.get(slug);
+
+/* True when the dashboard has closed the product to orders (sold out, pending or coming soon). */
+export const isClosed = (slug: string) => Boolean(bySlug.get(slug)?.status);
 
 export const categoryName = (slug: string) => CATEGORY_NAMES[slug] ?? slug;
 
