@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import Container from "../components/Container";
 import PageHero from "../components/PageHero";
 import Button from "../components/Button";
+import AddToCartButton from "../components/AddToCartButton";
 import ProductImage from "../components/ProductImage";
 import { categoryName, loadDetail, priceLabel, productBySlug, type ProductDetail } from "../data/catalog";
 import { regionBySlug } from "../data/taxonomy";
@@ -86,6 +87,7 @@ export default function Compare() {
                         <Link to={`/product/${p.slug}`} className="mt-3 block font-display font-semibold hover:underline">
                           {p.title}
                         </Link>
+                        <AddToCartButton product={p} className="mt-3 w-full" />
                       </div>
                     </th>
                   ))}

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Check, Plus } from "lucide-react";
+import AddToCartButton from "./AddToCartButton";
 import ProductImage from "./ProductImage";
 import { categoryName, priceLabel, type Product } from "../data/catalog";
 import { PRODUCT_STATUS_LABEL } from "../data/content";
@@ -48,6 +49,7 @@ export default function ProductCard({ product, eager = false }: { product: Produ
             <span className="hidden sm:inline">Compare</span>
           </button>
         </div>
+        <AddToCartButton product={product} className="mt-2 w-full" />
       </div>
     </article>
   );
