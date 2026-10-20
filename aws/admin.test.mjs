@@ -562,7 +562,7 @@ test("identityCall: signed requests to the project, and errors that carry only a
 });
 
 test("stack: dashboard route needs a Firebase sign-in, there is no Cognito, the access log is kept", () => {
-  const template = readFileSync(new URL("./medville-brace-orders.yaml", import.meta.url), "utf8");
+  const template = readFileSync(new URL("./medville-brace-orders.yaml", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.match(template, /RouteKey: POST \/admin\n\s*AuthorizationType: JWT\n\s*AuthorizerId: !Ref AdminAuthorizer/);
   assert.match(template, /AuthorizerType: JWT/);
   assert.match(template, /Issuer: !Sub https:\/\/securetoken\.google\.com\/\$\{FirebaseProjectId\}/);

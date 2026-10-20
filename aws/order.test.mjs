@@ -246,7 +246,7 @@ test("notification carries no customer details", async () => {
 });
 
 test("stack: closed by default, encrypted, recoverable, throttled, no request bodies in logs", () => {
-  const template = readFileSync(new URL("./medville-brace-orders.yaml", import.meta.url), "utf8");
+  const template = readFileSync(new URL("./medville-brace-orders.yaml", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.match(template, /OrdersEnabled:\s*\n\s*Type: String\s*\n\s*Default: "false"/);
   assert.match(template, /TableName: medville-brace-orders\n[\s\S]*?DeletionProtectionEnabled: true/);
   assert.match(template, /PointInTimeRecoveryEnabled: true/);
@@ -464,7 +464,7 @@ test("handler: a live catalog that is down does not stop an order from the built
 });
 
 test("stack: the orders table streams keys only, and the intake role is unchanged", () => {
-  const template = readFileSync(new URL("./medville-brace-orders.yaml", import.meta.url), "utf8");
+  const template = readFileSync(new URL("./medville-brace-orders.yaml", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const table = template.slice(template.indexOf("\n  OrdersTable:"), template.indexOf("\n  LimitsTable:"));
   assert.match(table, /StreamSpecification:\n\s*StreamViewType: KEYS_ONLY/);
   assert.doesNotMatch(template, /StreamViewType: (NEW_IMAGE|OLD_IMAGE|NEW_AND_OLD_IMAGES)/, "no stream carries an order's contents");

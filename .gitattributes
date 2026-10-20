@@ -1,0 +1,4 @@
+# Keep line endings the same on every computer. Some tests and scripts read
+# files such as aws/medville-brace-orders.yaml as plain text, and a Windows
+# checkout that converts them to CRLF breaks those checks.
+* text=auto eol=lf

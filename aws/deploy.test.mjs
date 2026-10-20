@@ -35,7 +35,7 @@ test("deploy script echoes commands only through redactArgs", () => {
 });
 
 test("every NoEcho parameter in the stack is on the redaction list", () => {
-  const template = readFileSync(new URL("./medville-brace-orders.yaml", import.meta.url), "utf8");
+  const template = readFileSync(new URL("./medville-brace-orders.yaml", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const noEcho = [...template.matchAll(/^  (\w+):\n(?:    .*\n)*?    NoEcho: true/gm)].map((m) => m[1]);
   assert.ok(noEcho.length >= 1, "the template has at least one NoEcho parameter");
   for (const name of noEcho) assert.equal(redactArgs([`${name}=secret-value`])[0], `${name}=...`, name);
