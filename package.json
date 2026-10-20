@@ -13,7 +13,7 @@
     "images:optimize": "node scripts/optimize-images.mjs",
     "audit": "node scripts/audit-catalog.mjs",
     "images:upload": "node scripts/upload-cloudinary.mjs",
-    "test:orders": "node --test aws/order.test.mjs aws/admin.test.mjs aws/figures.test.mjs",
+    "test:orders": "node --test aws/order.test.mjs aws/admin.test.mjs aws/figures.test.mjs aws/deploy.test.mjs",
     "build:orders": "node scripts/build-aws.mjs",
     "deploy:orders": "node scripts/deploy-orders.mjs",
     "predev": "node scripts/pull-content.mjs",

@@ -22,6 +22,7 @@
     AWS_REGION        defaults to us-east-1, the region in the site's CSP
 */
 import { spawnSync } from "node:child_process";
+import { redactArgs } from "./redact-args.mjs";
 
 const env = process.env;
 const bucket = env.AWS_DEPLOY_BUCKET;
@@ -35,7 +36,7 @@ const execute = process.argv.includes("--execute");
 
 function run(cmd, args) {
   /* The deploy hook URL works like a password: keep it out of the terminal. */
-  console.log(`> ${cmd} ${args.join(" ").replace(/DeployHookUrl=S+/, "DeployHookUrl=...")}`);
+  console.log(`> ${cmd} ${redactArgs(args).join(" ")}`);
   const r = spawnSync(cmd, args, { stdio: "inherit" });
   if (r.error || r.status !== 0) {
     console.error(r.error ? r.error.message : `${cmd} exited with ${r.status}`);

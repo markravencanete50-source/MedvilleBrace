@@ -61,4 +61,4 @@ Read README.md first. These are the rules that keep the site honest and on brand
 npm run build && npm run audit && npm run test:orders
 ```
 
-`test:orders` runs `aws/order.test.mjs`, `aws/admin.test.mjs` and `aws/figures.test.mjs`. Then look at the home, a region page, a product page and the order form at 390px and at desktop width.
+`test:orders` runs `aws/order.test.mjs`, `aws/admin.test.mjs`, `aws/figures.test.mjs` and `aws/deploy.test.mjs`. Then look at the home, a region page, a product page and the order form at 390px and at desktop width.
