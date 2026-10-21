@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import { createAdminHandler, orderView } from "./src/admin.mjs";
 import { accountView, createIdentity, identityCall } from "./src/identity.mjs";
 import { dayBounds, localParts, startOfDay, validDay, validTimeZone } from "./src/days.mjs";
+import { createPublisher, PublishHookError } from "./src/publish.mjs";
 
 const ORIGIN = "https://shop.test";
 const TZ = "America/New_York";
@@ -347,6 +348,93 @@ test("site.publish: staff can, but an unknown role cannot", async () => {
   assert.equal((await handler(event({ action: "site.publish" }, { user: "u-none" }))).statusCode, 403);
   assert.equal((await handler(event({ action: "site.publish" }, { user: "u-off" }))).statusCode, 403);
   assert.equal((await handler(event({ action: "site.publish" }, { user: "u-staff" }))).statusCode, 200);
+});
+
+test("publish hook: a response slower than eight seconds succeeds without a duplicate request", async () => {
+  let calls = 0;
+  const publish = createPublisher("https://hook.example.test/FAKE_TOKEN", {
+    fetchImpl: async (_url, { signal }) => {
+      calls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 8100));
+      signal.throwIfAborted();
+      return { ok: true };
+    },
+  });
+  await publish();
+  assert.equal(calls, 1);
+});
+
+test("publish hook: timeout, network and HTTP failures never expose the hook or raw exception", async () => {
+  for (const reason of ["timeout", "network", "http"]) {
+    const publish = createPublisher("https://hook.example.test/FAKE_TOKEN", {
+      timeoutMs: 10,
+      fetchImpl: async (_url, { signal }) => {
+        if (reason === "timeout") {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          signal.throwIfAborted();
+        }
+        if (reason === "network") throw new Error("FAKE_TOKEN and private request details");
+        return { ok: false, status: 502 };
+      },
+    });
+    await assert.rejects(publish(), (error) => {
+      assert.ok(error instanceof PublishHookError);
+      assert.equal(error.reason, reason);
+      assert.equal(error.status, reason === "http" ? 502 : undefined);
+      assert.doesNotMatch(String(error), /FAKE_TOKEN|private request/);
+      return true;
+    });
+  }
+});
+
+test("site.publish: an uncertain result keeps the cooldown and logs only safe diagnostics", async () => {
+  for (const reason of ["timeout", "network"]) {
+    let calls = 0;
+    const { handler, tick, db } = setup(SEED, { publish: async () => {
+      calls += 1;
+      throw new PublishHookError(reason);
+    } });
+    const logged = [];
+    const original = console.error;
+    console.error = (...args) => logged.push(args);
+    try {
+      const failed = await handler(event({ action: "site.publish", secret: "FAKE_TOKEN" }));
+      assert.equal(failed.statusCode, 503);
+      assert.match(json(failed).error, /may already have started/);
+      const retry = await handler(event({ action: "site.publish" }));
+      assert.equal(retry.statusCode, 503);
+      assert.match(json(retry).error, /may already have started/);
+      assert.equal(calls, 1);
+      assert.equal(db.audit.length, 0, "an uncertain publish is not recorded as successful");
+      tick(61000);
+      await handler(event({ action: "site.publish" }));
+      assert.equal(calls, 2, "an explicit retry is possible after the cooldown");
+    } finally {
+      console.error = original;
+    }
+    assert.equal(logged[0][1].failure, reason);
+    assert.doesNotMatch(JSON.stringify(logged), /FAKE_TOKEN|https:/);
+  }
+});
+
+test("site.publish: an explicit HTTP failure reports its status safely and permits a retry", async () => {
+  let calls = 0;
+  const { handler } = setup(SEED, { publish: async () => {
+    calls += 1;
+    if (calls === 1) throw new PublishHookError("http", 502);
+  } });
+  const logged = [];
+  const original = console.error;
+  console.error = (...args) => logged.push(args);
+  try {
+    const failed = await handler(event({ action: "site.publish" }));
+    assert.equal(failed.statusCode, 503);
+    assert.deepEqual(logged[0][1], { requestId: "test-request", action: "site.publish", failure: "http", status: 502 });
+    assert.deepEqual(json(await handler(event({ action: "site.publish" }))), { ok: true });
+    assert.equal(calls, 2);
+  } finally {
+    console.error = original;
+  }
 });
 
 test("admins: shared mailboxes refused, nobody changes their own access, and a change applies at once", async () => {

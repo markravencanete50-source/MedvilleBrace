@@ -19,6 +19,7 @@ import { createAdminHandler } from "./admin.mjs";
 import { createIdentity, identityCall } from "./identity.mjs";
 import { createGoogleAuth } from "./firestore.mjs";
 import { googleKey } from "./google-key.mjs";
+import { createPublisher } from "./publish.mjs";
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}), { marshallOptions: { removeUndefinedValues: true } });
 const DB_COMMANDS = { Get: GetCommand, Put: PutCommand, Query: QueryCommand, TransactWrite: TransactWriteCommand };
@@ -38,10 +39,5 @@ export const handler = createAdminHandler({
   ordersTable: process.env.ORDERS_TABLE,
   auditTable: process.env.AUDIT_TABLE,
   defaultTimeZone: process.env.BUSINESS_TIME_ZONE || "America/New_York",
-  publish: hook.startsWith("https://")
-    ? async () => {
-        const res = await fetch(hook, { method: "POST", signal: AbortSignal.timeout(8000) });
-        if (!res.ok) throw new Error(`deploy hook ${res.status}`);
-      }
-    : null,
+  publish: hook.startsWith("https://") ? createPublisher(hook) : null,
 });

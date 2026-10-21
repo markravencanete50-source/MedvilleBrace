@@ -347,7 +347,7 @@ Resources:
       Handler: index.handler
       Code: build/admin
       Role: !GetAtt AdminRole.Arn
-      Timeout: 20
+      Timeout: 30
       MemorySize: 512
       KmsKeyArn: !GetAtt OrdersKey.Arn
       LoggingConfig:
