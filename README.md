@@ -185,6 +185,8 @@ Set up in this order. Each step uses the output of the step before it.
 
    The deploy passes only the parameters that are set, so the other values on the stack stay as they are. The hook URL works like a password, so never commit it.
 
+   Publish waits up to 15 seconds for the deploy hook. If the result cannot be confirmed, a rebuild may already have started. Check Vercel deployments before trying again. The function blocks another hook request for one minute after an uncertain result; it never retries automatically. CloudWatch records only the failure category (timeout, network or HTTP) and an HTTP status when available, never the hook URL or response body.
+
 ### Notifications and opening orders
 
 - For notifications, deploy again with `SENDER_DOMAIN`, `SENDER_EMAIL` and `NOTIFY_TO`, publish the three DKIM records from the outputs in DNS, and request SES production access (in the SES sandbox the inbox must be verified too).

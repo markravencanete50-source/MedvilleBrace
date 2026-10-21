@@ -31,6 +31,7 @@ import { reply } from "./order.mjs";
 import { dayBounds, validDay, validTimeZone } from "./days.mjs";
 import { ROLES } from "./identity.mjs";
 import { ORDER_STATUSES } from "./figures.mjs";
+import { PublishHookError } from "./publish.mjs";
 
 export { ORDER_STATUSES };
 
@@ -112,6 +113,7 @@ function decodeCursor(value, pk) {
 export function createAdminHandler({ origins, db, users, ordersTable, auditTable, publish = null, defaultTimeZone = "America/New_York", now = () => Date.now() }) {
   const actors = new Map();
   let publishedAt = -Infinity;
+  let uncertainPublish = null;
 
   async function actorFor(username) {
     const hit = actors.get(username);
@@ -217,14 +219,19 @@ export function createAdminHandler({ origins, db, users, ordersTable, auditTable
 
     async "site.publish"(actor) {
       if (!publish) return { status: 400, error: "Publishing is not set up yet. Store changes appear after the next deploy. See README.md, Store content." };
-      if (now() - publishedAt < PUBLISH_GAP_MS) return { ok: true, already: true };
-      /* Claim the gap first, so two quick clicks start one rebuild; give it back if the hook fails. */
+      if (now() - publishedAt < PUBLISH_GAP_MS) {
+        if (uncertainPublish) throw uncertainPublish;
+        return { ok: true, already: true };
+      }
+      /* Keep the gap after an uncertain response: the hook may already have started a rebuild. */
       const previous = publishedAt;
       publishedAt = now();
+      uncertainPublish = null;
       try {
         await publish();
       } catch (error) {
-        publishedAt = previous;
+        if (!(error instanceof PublishHookError) || error.reason === "http") publishedAt = previous;
+        else uncertainPublish = error;
         throw error;
       }
       await audit(actor, "site.publish");
@@ -361,7 +368,15 @@ export function createAdminHandler({ origins, db, users, ordersTable, auditTable
       const result = await actions[action](actor, body);
       const { status = 200, ...rest } = result;
       return reply(status, origin, rest);
-    } catch {
+    } catch (error) {
+      if (action === "site.publish" && error instanceof PublishHookError) {
+        /* Only fixed categories and numeric status codes. Never log the URL or raw exception. */
+        console.error("admin request failed", { requestId: event.requestContext?.requestId, action, failure: error.reason, ...(error.status ? { status: error.status } : {}) });
+        const message = error.reason === "http"
+          ? "Publishing could not be started. Please try again later."
+          : "The publish result could not be confirmed. A rebuild may already have started. Check Vercel deployments before trying again.";
+        return reply(503, origin, { error: message });
+      }
       console.error("admin request failed", { requestId: event.requestContext?.requestId, action });
       return reply(503, origin, { error: "The order service is not available right now. Please try again." });
     }

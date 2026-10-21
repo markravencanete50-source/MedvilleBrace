@@ -167,7 +167,7 @@ async function call<T>(getToken: GetToken, action: string, payload: Record<strin
     res = await fetch(ADMIN_ENDPOINT, {
       method: "POST",
       cache: "no-store",
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(action === "site.publish" ? 30000 : 20000),
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ action, ...payload }),
     });
